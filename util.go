@@ -34,7 +34,12 @@ func String2IP(s string) (int32, error) {
 		raw[i] = value
 	}
 
-	return int32(raw[0] | ((raw[1] << 8) & 0xff00) | ((raw[2] << 16) & 0xff0000) | ((raw[3] << 24) & 0xff000000)), nil
+	return int32(
+		uint32(raw[0]) |
+			(uint32(raw[1]) << 8) |
+			(uint32(raw[2]) << 16) |
+			(uint32(raw[3]) << 24),
+	), nil
 }
 
 func Int2Address(ip int32) net.IP {
