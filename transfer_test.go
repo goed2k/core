@@ -9,6 +9,7 @@ import (
 
 	"github.com/monkeyWie/goed2k/data"
 	"github.com/monkeyWie/goed2k/protocol"
+	serverproto "github.com/monkeyWie/goed2k/protocol/server"
 )
 
 type testDiskCallable struct {
@@ -225,6 +226,79 @@ func TestSessionOnServerIDChangeRequestsSourcesForExistingTransfers(t *testing.T
 	}
 	if transfer.nextDHTRequest <= now {
 		t.Fatalf("expected transfer nextDHTRequest to be backed off after handshake, got %d", transfer.nextDHTRequest)
+	}
+}
+
+func TestSessionOnServerIDChangePublishesFinishedTransfers(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	transfer.state = Finished
+	addr := &net.TCPAddr{IP: net.IPv4(45, 82, 80, 155), Port: 5687}
+	server := NewServerConnection("a", addr, session)
+	server.handshakeCompleted = true
+	session.serverConnections["a"] = server
+
+	session.OnServerIDChange(server, 1234, 0, 0)
+
+	packets := server.PendingPackets()
+	if len(packets) == 0 {
+		t.Fatal("expected packets after finished transfer publish")
+	}
+	combiner := serverproto.NewPacketCombiner()
+	found := false
+	for _, raw := range packets {
+		_, packet, err := combiner.UnpackFrame(raw)
+		if err != nil {
+			t.Fatalf("unpack frame: %v", err)
+		}
+		offer, ok := packet.(*serverproto.OfferFiles)
+		if !ok {
+			continue
+		}
+		found = true
+		if len(offer.Entries) != 1 {
+			t.Fatalf("expected one offered file, got %d", len(offer.Entries))
+		}
+		if !offer.Entries[0].Hash.Equal(transfer.GetHash()) {
+			t.Fatalf("unexpected offered hash: %s", offer.Entries[0].Hash.String())
+		}
+		if got, ok := offer.Entries[0].StringTag(protocol.FTFilename); !ok || got != transfer.FileName() {
+			t.Fatalf("unexpected offered filename: %q %t", got, ok)
+		}
+	}
+	if !found {
+		t.Fatal("expected OfferFiles packet after handshake")
+	}
+}
+
+func TestTransferFinishedPublishesToConnectedServer(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	addr := &net.TCPAddr{IP: net.IPv4(45, 82, 80, 155), Port: 5687}
+	server := NewServerConnection("a", addr, session)
+	server.handshakeCompleted = true
+	session.serverConnection = server
+	session.serverConnections["a"] = server
+	session.clientID = 1234
+
+	transfer.finished()
+
+	packets := server.PendingPackets()
+	if len(packets) == 0 {
+		t.Fatal("expected offered file packet after transfer finished")
+	}
+	combiner := serverproto.NewPacketCombiner()
+	found := false
+	for _, raw := range packets {
+		_, packet, err := combiner.UnpackFrame(raw)
+		if err != nil {
+			t.Fatalf("unpack frame: %v", err)
+		}
+		if _, ok := packet.(*serverproto.OfferFiles); ok {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected OfferFiles packet after transfer finished")
 	}
 }
 

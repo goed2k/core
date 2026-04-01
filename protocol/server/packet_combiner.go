@@ -4,6 +4,7 @@ import "github.com/monkeyWie/goed2k/protocol"
 
 const (
 	opGetServerList   byte = 0x14
+	opOfferFiles      byte = 0x15
 	opSearchRequest   byte = 0x16
 	opGetSources      byte = 0x19
 	opCallbackRequest byte = 0x1C
@@ -21,6 +22,7 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc := protocol.NewPacketCombiner()
 	pc.Register(protocol.PK(protocol.EdonkeyHeader, opLoginRequest), "server.LoginRequest", func() protocol.Serializable { return &LoginRequest{} })
 	pc.Register(protocol.PK(protocol.EdonkeyHeader, opGetServerList), "server.GetList", func() protocol.Serializable { return &GetList{} })
+	pc.Register(protocol.PK(protocol.EdonkeyHeader, opOfferFiles), "server.OfferFiles", func() protocol.Serializable { return &OfferFiles{} })
 	pc.Register(protocol.PK(protocol.EdonkeyHeader, opSearchRequest), "server.SearchRequest", func() protocol.Serializable { return &SearchRequest{} })
 	pc.Register(protocol.PK(protocol.EdonkeyHeader, opGetSources), "server.GetFileSources", func() protocol.Serializable { return &GetFileSources{} })
 	pc.Register(protocol.PK(protocol.EdonkeyHeader, opQueryMore), "server.SearchMore", func() protocol.Serializable { return &SearchMore{} })

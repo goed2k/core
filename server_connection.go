@@ -124,6 +124,16 @@ func (s *ServerConnection) SendGetList() {
 	}
 }
 
+func (s *ServerConnection) SendOfferFiles(packet *serverproto.OfferFiles) {
+	if packet == nil || len(packet.Entries) == 0 {
+		return
+	}
+	debugPeerf("server %s -> OfferFiles count=%d", s.identifier, len(packet.Entries))
+	if raw, err := s.combiner.Pack("server.OfferFiles", packet); err == nil {
+		s.QueuePacket(raw)
+	}
+}
+
 func (s *ServerConnection) ProcessIncoming() error {
 	_, packets, err := s.DecodeFrames(&s.combiner)
 	if err != nil {

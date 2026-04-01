@@ -920,6 +920,7 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 		return
 	}
 	var kick []*Transfer
+	var offerFiles []serverproto.OfferFile
 	s.mu.Lock()
 	if s.serverConnection == nil || !s.serverConnection.IsHandshakeCompleted() {
 		s.serverConnection = sc
@@ -930,15 +931,46 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 		s.auxPort = auxPort
 	}
 	for _, transfer := range s.transfers {
-		if transfer == nil || transfer.IsPaused() || transfer.IsAborted() || transfer.IsFinished() {
+		if transfer == nil || transfer.IsPaused() || transfer.IsAborted() {
+			continue
+		}
+		if transfer.IsFinished() {
+			offerFiles = append(offerFiles, serverproto.OfferFile{
+				Hash: transfer.GetHash(),
+				Name: transfer.FileName(),
+				Size: transfer.Size(),
+			})
 			continue
 		}
 		kick = append(kick, transfer)
 	}
 	s.mu.Unlock()
+	if len(offerFiles) > 0 {
+		packet := serverproto.NewOfferFiles(clientID, s.GetListenPort(), offerFiles)
+		sc.SendOfferFiles(&packet)
+	}
 	for _, transfer := range kick {
 		s.RequestSourcesNow(transfer)
 	}
+}
+
+func (s *Session) PublishTransferToServer(t *Transfer) {
+	if s == nil || t == nil {
+		return
+	}
+	s.mu.Lock()
+	sc := s.serverConnection
+	clientID := s.clientID
+	s.mu.Unlock()
+	if sc == nil || !sc.IsHandshakeCompleted() || clientID == 0 || t.IsPaused() || t.IsAborted() || !t.IsFinished() {
+		return
+	}
+	packet := serverproto.NewOfferFiles(clientID, s.GetListenPort(), []serverproto.OfferFile{{
+		Hash: t.GetHash(),
+		Name: t.FileName(),
+		Size: t.Size(),
+	}})
+	sc.SendOfferFiles(&packet)
 }
 
 func (s *Session) ensureServerConnectionPolicy(identifier string) *ServerConnectionPolicy {
