@@ -41,6 +41,8 @@ type Session struct {
 	friendSlots            map[string]bool
 	activeSearch           *searchTask
 	nextSearchID           uint32
+	lastKadPublishEndpoint   protocol.Endpoint
+	lastKadPeriodicPublishAt int64
 }
 
 type diskTask struct {
@@ -429,6 +431,7 @@ func (s *Session) SecondTick(currentSessionTime, tickIntervalMS int64) {
 		s.uploadQueue.Process()
 	}
 	s.tickSearches(currentSessionTime)
+	s.maybePeriodicKadPublish(currentSessionTime)
 	s.processDiskTasks()
 	s.accumulator.SecondTick(tickIntervalMS)
 	s.ConnectNewPeers()
@@ -934,7 +937,7 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 		if transfer == nil || transfer.IsPaused() || transfer.IsAborted() {
 			continue
 		}
-		if transfer.IsFinished() {
+		if transfer.isFinishedForSharePublish() {
 			offerFiles = append(offerFiles, serverproto.OfferFile{
 				Hash: transfer.GetHash(),
 				Name: transfer.FileName(),
@@ -949,6 +952,7 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 		packet := serverproto.NewOfferFiles(clientID, s.GetListenPort(), offerFiles)
 		sc.SendOfferFiles(&packet)
 	}
+	s.publishAllFinishedTransfersKADAfterServerChange()
 	for _, transfer := range kick {
 		s.RequestSourcesNow(transfer)
 	}
@@ -962,7 +966,7 @@ func (s *Session) PublishTransferToServer(t *Transfer) {
 	sc := s.serverConnection
 	clientID := s.clientID
 	s.mu.Unlock()
-	if sc == nil || !sc.IsHandshakeCompleted() || clientID == 0 || t.IsPaused() || t.IsAborted() || !t.IsFinished() {
+	if sc == nil || !sc.IsHandshakeCompleted() || clientID == 0 || t.IsPaused() || t.IsAborted() || !t.isFinishedForSharePublish() {
 		return
 	}
 	packet := serverproto.NewOfferFiles(clientID, s.GetListenPort(), []serverproto.OfferFile{{

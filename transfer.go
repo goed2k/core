@@ -263,6 +263,16 @@ func (t *Transfer) IsFinished() bool {
 	return t.numPieces == 0 || t.picker.NumHave() == t.picker.NumPieces()
 }
 
+func (t *Transfer) isFinishedForSharePublish() bool {
+	if t == nil {
+		return false
+	}
+	if t.state == Finished {
+		return true
+	}
+	return t.IsFinished()
+}
+
 func (t *Transfer) ResumeData() *protocol.TransferResumeData {
 	trd := &protocol.TransferResumeData{}
 	trd.Hashes = append(trd.Hashes, t.hashSet...)
@@ -737,6 +747,7 @@ func (t *Transfer) finished() {
 	if t.session != nil {
 		t.session.SubmitDiskTask(NewAsyncRelease(t, false))
 		t.session.PublishTransferToServer(t)
+		t.session.PublishTransferToKAD(t)
 	}
 	t.needSaveResumeData = true
 }
