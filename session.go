@@ -924,7 +924,6 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 	}
 	var kick []*Transfer
 	var offerFiles []serverproto.OfferFile
-	var offerFiles []serverproto.OfferFile
 	s.mu.Lock()
 	if s.serverConnection == nil || !s.serverConnection.IsHandshakeCompleted() {
 		s.serverConnection = sc
