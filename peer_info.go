@@ -7,10 +7,11 @@ import (
 )
 
 const (
-	PeerIncoming byte = 0x1
-	PeerServer   byte = 0x2
-	PeerDHT      byte = 0x4
-	PeerResume   byte = 0x8
+	PeerIncoming       byte = 0x1
+	PeerServer         byte = 0x2
+	PeerDHT            byte = 0x4
+	PeerResume         byte = 0x8
+	PeerSourceExchange byte = 0x10
 )
 
 type PeerInfo struct {
@@ -41,6 +42,9 @@ func PeerSourceLabels(sourceFlag int) []string {
 	}
 	if (sourceFlag & int(PeerIncoming)) != 0 {
 		labels = append(labels, "incoming")
+	}
+	if (sourceFlag & int(PeerSourceExchange)) != 0 {
+		labels = append(labels, "sx")
 	}
 	if len(labels) == 0 {
 		labels = append(labels, "unknown")

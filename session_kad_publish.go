@@ -124,16 +124,56 @@ func (s *Session) PublishTransferToKAD(t *Transfer) {
 	s.noteKadPublish(ep, now)
 }
 
+func (s *Session) publishSingleSharedFileKAD(tracker *DHTTracker, ep protocol.Endpoint, sf *SharedFile) {
+	if tracker == nil || sf == nil || !ep.Defined() || !sf.Completed {
+		return
+	}
+	hash := sf.Hash
+	if !tracker.PublishSource(hash, ep, sf.Size()) {
+		logx.Debug("kad publish source skipped or failed", "hash", hash.String())
+	}
+	keyword := pickKadKeyword(sf.FileLabel())
+	if keyword == "" {
+		return
+	}
+	keywordHash, err := protocol.HashFromData([]byte(keyword))
+	if err != nil {
+		return
+	}
+	entry := kadproto.SearchEntry{
+		ID:   kadproto.NewID(hash),
+		Tags: kadTagsForSharedFile(sf.FileLabel(), sf.Size()),
+	}
+	if !tracker.PublishKeyword(keywordHash, entry) {
+		logx.Debug("kad publish keyword skipped or failed", "keyword", keyword, "hash", hash.String())
+	}
+}
+
 func (s *Session) publishAllFinishedTransfersKAD(ep protocol.Endpoint) {
 	if !s.settings.EnableDHT || s.dhtTracker == nil || !ep.Defined() {
 		return
 	}
 	tracker := s.dhtTracker
+	seen := make(map[string]struct{})
 	for _, t := range s.snapshotTransfers() {
 		if t == nil || t.IsPaused() || t.IsAborted() || !t.isFinishedForSharePublish() {
 			continue
 		}
 		s.publishSingleTransferKAD(tracker, ep, t)
+		seen[t.GetHash().String()] = struct{}{}
+	}
+	if s.sharedStore == nil {
+		return
+	}
+	for _, sf := range s.sharedStore.List() {
+		if sf == nil || !sf.Completed || !validateSharedFileOnDisk(sf) {
+			continue
+		}
+		if _, ok := seen[sf.Hash.String()]; ok {
+			continue
+		}
+		s.publishSingleSharedFileKAD(tracker, ep, sf)
+		seen[sf.Hash.String()] = struct{}{}
 	}
 }
 

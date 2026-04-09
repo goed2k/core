@@ -12,7 +12,7 @@ import (
 	"github.com/monkeyWie/goed2k/protocol"
 )
 
-const clientStateVersion = 2
+const clientStateVersion = 3
 
 type ClientStateStore interface {
 	Load() (*ClientState, error)
@@ -26,6 +26,20 @@ type ClientState struct {
 	Credits       []ClientCreditState   `json:"credits,omitempty"`
 	FriendSlots   []protocol.Hash       `json:"friend_slots,omitempty"`
 	DHT           *ClientDHTState       `json:"dht,omitempty"`
+	SharedDirs    []string              `json:"shared_dirs,omitempty"`
+	SharedFiles   []ClientSharedFileState `json:"shared_files,omitempty"`
+}
+
+// ClientSharedFileState 持久化的共享文件元数据。
+type ClientSharedFileState struct {
+	Hash        protocol.Hash   `json:"hash"`
+	Size        int64           `json:"size"`
+	Path        string          `json:"path"`
+	Name        string          `json:"name"`
+	PieceHashes []protocol.Hash `json:"piece_hashes,omitempty"`
+	Origin      SharedOrigin    `json:"origin"`
+	Completed   bool            `json:"completed"`
+	LastHashAt  int64           `json:"last_hash_at,omitempty"`
 }
 
 type ClientTransferState struct {
@@ -193,6 +207,22 @@ func (c *Client) snapshotState() (*ClientState, error) {
 	if tracker := c.GetDHTTracker(); tracker != nil {
 		state.DHT = tracker.SnapshotState()
 	}
+	state.SharedDirs = c.session.ListSharedDirs()
+	for _, sf := range c.session.SharedFiles() {
+		if sf == nil {
+			continue
+		}
+		state.SharedFiles = append(state.SharedFiles, ClientSharedFileState{
+			Hash:        sf.Hash,
+			Size:        sf.FileSize,
+			Path:        sf.Path,
+			Name:        sf.Name,
+			PieceHashes: append([]protocol.Hash(nil), sf.PieceHashes...),
+			Origin:      sf.Origin,
+			Completed:   sf.Completed,
+			LastHashAt:  sf.LastHashAt,
+		})
+	}
 	for _, handle := range handles {
 		if !handle.IsValid() {
 			continue
@@ -218,7 +248,7 @@ func (c *Client) applyState(state *ClientState) error {
 	if state == nil {
 		return nil
 	}
-	if state.Version != 0 && state.Version != 1 && state.Version != clientStateVersion {
+	if state.Version != 0 && state.Version != 1 && state.Version != 2 && state.Version != clientStateVersion {
 		return errors.New("unsupported state version")
 	}
 	c.serverAddr = state.ServerAddress
@@ -229,6 +259,33 @@ func (c *Client) applyState(state *ClientState) error {
 			return err
 		}
 	}
+	c.session.mu.Lock()
+	c.session.sharedDirs = make([]string, 0, len(state.SharedDirs))
+	for _, d := range state.SharedDirs {
+		if nd, err := normalizeSharedPath(d); err == nil {
+			c.session.sharedDirs = append(c.session.sharedDirs, nd)
+		}
+	}
+	c.session.mu.Unlock()
+	restored := make([]*SharedFile, 0, len(state.SharedFiles))
+	for _, rec := range state.SharedFiles {
+		sf := &SharedFile{
+			Hash:        rec.Hash,
+			FileSize:    rec.Size,
+			Path:        rec.Path,
+			Name:        rec.Name,
+			PieceHashes: append([]protocol.Hash(nil), rec.PieceHashes...),
+			Origin:      rec.Origin,
+			Completed:   rec.Completed,
+			LastHashAt:  rec.LastHashAt,
+		}
+		if !validateSharedFileOnDisk(sf) {
+			continue
+		}
+		restored = append(restored, sf)
+	}
+	c.session.sharedStore.ReplaceAll(restored)
+
 	for _, record := range state.Transfers {
 		if record.TargetPath == "" {
 			continue

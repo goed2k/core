@@ -21,6 +21,7 @@ type managerPage string
 const (
 	managerPageTransfers managerPage = "transfers"
 	managerPageSearch    managerPage = "search"
+	managerPageShared    managerPage = "shared"
 )
 
 const (
@@ -54,6 +55,8 @@ type tuiModel struct {
 	searchInput   textinput.Model
 	searchTable   table.Model
 	searchFocus   int
+	sharedTable   table.Model
+	sharedFiles   []*ed2k.SharedFile
 }
 
 func runManagerTUI(app *appContext, cfg runConfig) (string, error) {
@@ -114,7 +117,7 @@ func runManagerScreen(app *appContext, cfg runConfig) (tuiModel, error) {
 
 func newTUIModel(app *appContext, cfg runConfig, events <-chan ed2k.ClientStatusEvent) tuiModel {
 	commandInput := textinput.New()
-	commandInput.Placeholder = "/new or /setting"
+	commandInput.Placeholder = "/new /search /shared /setting"
 	commandInput.CharLimit = 256
 	commandInput.Width = 48
 	searchInput := textinput.New()
@@ -137,8 +140,10 @@ func newTUIModel(app *appContext, cfg runConfig, events <-chan ed2k.ClientStatus
 	}
 	m.table = newTransferTable()
 	m.searchTable = newSearchTable()
+	m.sharedTable = newSharedTable()
 	m.syncTransfers()
 	m.syncSearchResults()
+	m.syncShared()
 	return m
 }
 
@@ -176,6 +181,23 @@ func newSearchTable() table.Model {
 		table.WithRows(nil),
 		table.WithFocused(true),
 		table.WithHeight(12),
+	)
+	t.SetStyles(defaultTableStyles())
+	return t
+}
+
+func newSharedTable() table.Model {
+	columns := []table.Column{
+		{Title: "Name", Width: 24},
+		{Title: "Hash", Width: 18},
+		{Title: "Size", Width: 10},
+		{Title: "Origin", Width: 10},
+	}
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(nil),
+		table.WithFocused(true),
+		table.WithHeight(10),
 	)
 	t.SetStyles(defaultTableStyles())
 	return t
@@ -220,6 +242,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search = m.client.SearchSnapshot()
 		m.syncTransfers()
 		m.syncSearchResults()
+		m.syncShared()
 		return m, waitStatusCmd(m.statusEvents)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -229,6 +252,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.page == managerPageSearch {
 			return m.updateSearchPage(msg)
+		}
+		if m.page == managerPageShared {
+			return m.updateSharedPage(msg)
 		}
 		if m.commandMode {
 			switch msg.String() {
@@ -383,6 +409,9 @@ func (m tuiModel) View() string {
 	if m.page == managerPageSearch {
 		return m.renderSearchPage()
 	}
+	if m.page == managerPageShared {
+		return m.renderSharedPage()
+	}
 	header := m.renderHeader()
 	leftWidth := maxInt(42, m.width/2-1)
 	rightWidth := maxInt(40, m.width-leftWidth-3)
@@ -391,13 +420,13 @@ func (m tuiModel) View() string {
 	rightPane := panelStyle(rightWidth).Render(m.renderDetails(rightWidth - 2))
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
-	baseFooter := "keys: ↑/↓ or j/k move • / command • p pause/resume • x remove • r refresh • q quit • /search resources"
+	baseFooter := "keys: ↑/↓ or j/k move • / command • p pause/resume • x remove • r refresh • q quit • /search • /shared"
 	footer := footerStyle.Render(baseFooter)
 	if strings.TrimSpace(m.statusMessage) != "" {
 		footer = footerStyle.Render(m.statusMessage + "    " + baseFooter)
 	}
 	if m.commandMode {
-		footer = footerStyle.Render("command: " + m.commandInput.View() + "    available: /new /search /setting /quit")
+		footer = footerStyle.Render("command: " + m.commandInput.View() + "    available: /new /search /shared /setting /quit")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
@@ -472,6 +501,96 @@ func (m *tuiModel) syncTransfers() {
 	m.updateSelectionFromCursor()
 }
 
+func (m *tuiModel) syncShared() {
+	m.sharedFiles = m.client.SharedFiles()
+	rows := make([]table.Row, 0, len(m.sharedFiles))
+	for _, sf := range m.sharedFiles {
+		if sf == nil {
+			continue
+		}
+		origin := "imported"
+		if sf.Origin == ed2k.SharedOriginDownloaded {
+			origin = "downloaded"
+		}
+		rows = append(rows, table.Row{
+			trimString(sf.FileLabel(), 24),
+			trimString(sf.Hash.String(), 18),
+			humanSize(sf.FileSize),
+			origin,
+		})
+	}
+	m.sharedTable.SetRows(rows)
+	if len(rows) == 0 {
+		m.sharedTable.SetCursor(0)
+		return
+	}
+	if m.sharedTable.Cursor() >= len(rows) {
+		m.sharedTable.SetCursor(len(rows) - 1)
+	}
+}
+
+func (m tuiModel) updateSharedPage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.page = managerPageTransfers
+		m.resize()
+		return m, nil
+	case "r":
+		if err := m.client.RescanSharedDirs(); err != nil {
+			m.statusMessage = err.Error()
+			return m, nil
+		}
+		m.syncShared()
+		m.statusMessage = "shared dirs rescanned"
+		return m, nil
+	case "x":
+		sf := m.selectedSharedFile()
+		if sf == nil {
+			m.statusMessage = "no shared file selected"
+			return m, nil
+		}
+		if m.client.RemoveSharedFile(sf.Hash) {
+			m.statusMessage = "removed " + sf.FileLabel()
+		}
+		m.syncShared()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.sharedTable, cmd = m.sharedTable.Update(msg)
+	return m, cmd
+}
+
+func (m tuiModel) selectedSharedFile() *ed2k.SharedFile {
+	cursor := m.sharedTable.Cursor()
+	if cursor < 0 || cursor >= len(m.sharedFiles) {
+		return nil
+	}
+	return m.sharedFiles[cursor]
+}
+
+func (m tuiModel) renderSharedPage() string {
+	header := headerStyle.Render("goed2k shared library")
+	dirs := m.client.ListSharedDirs()
+	dirLines := "shared dirs: (none)"
+	if len(dirs) > 0 {
+		dirLines = "shared dirs:\n" + strings.Join(dirs, "\n")
+	}
+	info := []string{
+		dirLines,
+		"",
+		"files:",
+	}
+	dirPane := panelStyle(maxInt(80, m.width-2)).Render(strings.Join(info, "\n"))
+	tablePane := panelStyle(maxInt(80, m.width-2)).Render(m.sharedTable.View())
+	footer := footerStyle.Render("Esc back • r rescan dirs • x remove selected • /shared-add /shared-import paths • q quit")
+	if strings.TrimSpace(m.statusMessage) != "" {
+		footer = footerStyle.Render(m.statusMessage + "    Esc back • r rescan • x remove • q quit")
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, dirPane, tablePane, footer)
+}
+
 func (m *tuiModel) syncSearchResults() {
 	rows := make([]table.Row, 0, len(m.search.Results))
 	for i, result := range m.search.Results {
@@ -510,6 +629,8 @@ func (m *tuiModel) resize() {
 	m.table.SetWidth(maxInt(42, m.width/2-2))
 	m.searchTable.SetHeight(maxInt(8, m.height-10))
 	m.searchTable.SetWidth(maxInt(80, m.width-6))
+	m.sharedTable.SetHeight(maxInt(8, m.height-12))
+	m.sharedTable.SetWidth(maxInt(80, m.width-6))
 }
 
 func (m tuiModel) executeCommand() (tea.Model, tea.Cmd) {
@@ -522,6 +643,13 @@ func (m tuiModel) executeCommand() (tea.Model, tea.Cmd) {
 	case "/new":
 		m.nextAction = managerActionNew
 		return m, tea.Quit
+	case "/shared":
+		m.page = managerPageShared
+		m.sharedTable = newSharedTable()
+		m.resize()
+		m.syncShared()
+		m.statusMessage = ""
+		return m, nil
 	case "/search":
 		m.page = managerPageSearch
 		m.searchFocus = 0
@@ -554,6 +682,43 @@ func (m tuiModel) executeCommand() (tea.Model, tea.Cmd) {
 	case "":
 		return m, nil
 	default:
+		if strings.HasPrefix(command, "/shared-add ") {
+			path := strings.TrimSpace(strings.TrimPrefix(command, "/shared-add"))
+			if path == "" {
+				m.statusMessage = "usage: /shared-add <dir>"
+				return m, nil
+			}
+			if err := m.client.AddSharedDir(path); err != nil {
+				m.statusMessage = err.Error()
+				return m, nil
+			}
+			m.syncShared()
+			m.statusMessage = "added shared dir: " + path
+			return m, nil
+		}
+		if strings.HasPrefix(command, "/shared-import ") {
+			path := strings.TrimSpace(strings.TrimPrefix(command, "/shared-import"))
+			if path == "" {
+				m.statusMessage = "usage: /shared-import <file>"
+				return m, nil
+			}
+			if err := m.client.ImportSharedFile(path); err != nil {
+				m.statusMessage = err.Error()
+				return m, nil
+			}
+			m.syncShared()
+			m.statusMessage = "imported " + path
+			return m, nil
+		}
+		if command == "/shared-rescan" {
+			if err := m.client.RescanSharedDirs(); err != nil {
+				m.statusMessage = err.Error()
+				return m, nil
+			}
+			m.syncShared()
+			m.statusMessage = "rescanned shared dirs"
+			return m, nil
+		}
 		m.statusMessage = "unknown command: " + command
 		return m, nil
 	}

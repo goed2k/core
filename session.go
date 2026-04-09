@@ -43,6 +43,8 @@ type Session struct {
 	nextSearchID             uint32
 	lastKadPublishEndpoint   protocol.Endpoint
 	lastKadPeriodicPublishAt int64
+	sharedStore              *SharedStore
+	sharedDirs               []string
 }
 
 type diskTask struct {
@@ -73,6 +75,8 @@ func NewSession(st Settings) *Session {
 		incomingConns:          make(chan net.Conn, 32),
 		credits:                NewPeerCreditManager(),
 		friendSlots:            make(map[string]bool),
+		sharedStore:            NewSharedStore(),
+		sharedDirs:             make([]string, 0),
 	}
 	session.initUploadQueue()
 	return session
@@ -922,8 +926,8 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 	if sc == nil {
 		return
 	}
+	offerFiles := s.collectPublishableOfferFiles()
 	var kick []*Transfer
-	var offerFiles []serverproto.OfferFile
 	s.mu.Lock()
 	if s.serverConnection == nil || !s.serverConnection.IsHandshakeCompleted() {
 		s.serverConnection = sc
@@ -938,11 +942,6 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 			continue
 		}
 		if transfer.isFinishedForSharePublish() {
-			offerFiles = append(offerFiles, serverproto.OfferFile{
-				Hash: transfer.GetHash(),
-				Name: transfer.FileName(),
-				Size: transfer.Size(),
-			})
 			continue
 		}
 		kick = append(kick, transfer)

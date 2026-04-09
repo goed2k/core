@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -12,6 +13,9 @@ func TestLoadServerMetFixtures(t *testing.T) {
 		filepath.Join("..", "..", "..", "jed2k", "core", "src", "main", "resources", "server2.met"),
 	}
 	for _, path := range fixtures {
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("跳过：外部 jed2k fixture 不可用 (%s): %v", path, err)
+		}
 		met, err := LoadServerMet(path)
 		if err != nil {
 			t.Fatalf("load %s: %v", path, err)

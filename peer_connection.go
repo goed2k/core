@@ -134,30 +134,32 @@ func NewPendingBlock(block data.PieceBlock, totalSize int64) PendingBlock {
 
 type PeerConnection struct {
 	Connection
-	remotePeerInfo    RemotePeerInfo
-	remoteHash        protocol.Hash
-	transfer          *Transfer
-	remotePieces      protocol.BitField
-	speed             PeerSpeed
-	peerInfo          *Peer
-	failed            bool
-	transferringData  bool
-	recvReq           data.PeerRequest
-	recvReqCompressed bool
-	recvPos           int
-	endpoint          protocol.Endpoint
-	combiner          protocol.PacketCombiner
-	downloadQueue     []PendingBlock
-	uploadState       UploadState
-	uploadQueueRank   uint16
-	uploadWaitStart   int64
-	uploadStartTime   int64
-	uploadSessionBase int64
-	lastUploadRequest int64
-	uploadBlocks      []RequestedUploadBlock
-	uploadDone        []RequestedUploadBlock
-	uploadAddNext     bool
-	friendSlot        bool
+	remotePeerInfo     RemotePeerInfo
+	remoteHash         protocol.Hash
+	transfer           *Transfer
+	remotePieces       protocol.BitField
+	speed              PeerSpeed
+	peerInfo           *Peer
+	failed             bool
+	transferringData   bool
+	recvReq            data.PeerRequest
+	recvReqCompressed  bool
+	recvPos            int
+	endpoint           protocol.Endpoint
+	combiner           protocol.PacketCombiner
+	downloadQueue      []PendingBlock
+	uploadState        UploadState
+	uploadQueueRank    uint16
+	uploadWaitStart    int64
+	uploadStartTime    int64
+	uploadSessionBase  int64
+	lastUploadRequest  int64
+	uploadBlocks       []RequestedUploadBlock
+	uploadDone         []RequestedUploadBlock
+	uploadAddNext      bool
+	friendSlot         bool
+	uploadResource     UploadableResource
+	sourceExchangeSent bool
 }
 
 func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Transfer, peerInfo *Peer) *PeerConnection {
@@ -223,6 +225,7 @@ func (p *PeerConnection) OnDisconnect(ec BaseErrorCode) {
 		transfer.RemovePeerConnection(p)
 		p.transfer = nil
 	}
+	p.uploadResource = nil
 	p.session.CloseConnection(p)
 }
 
@@ -334,7 +337,7 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 	mo := MiscOptions{
 		UnicodeSupport:     1,
 		DataCompVer:        p.session.GetCompressionVersion(),
-		SourceExchange1Ver: 0,
+		SourceExchange1Ver: 1,
 		NoViewSharedFiles:  1,
 	}
 	var mo2 MiscOptions2
@@ -402,13 +405,13 @@ func (p *PeerConnection) SendFileRequest(hash protocol.Hash) {
 	}
 }
 
-func (p *PeerConnection) SendFileAnswer(transfer *Transfer) {
-	if transfer == nil {
+func (p *PeerConnection) SendFileAnswer(res UploadableResource) {
+	if res == nil {
 		return
 	}
 	packet := clientproto.FileAnswer{
-		Hash: transfer.GetHash(),
-		Name: protocol.ByteContainer16FromString(filepath.Base(transfer.FileName())),
+		Hash: res.GetHash(),
+		Name: protocol.ByteContainer16FromString(filepath.Base(res.FileLabel())),
 	}
 	if raw, err := p.combiner.Pack("client.FileAnswer", &packet); err == nil {
 		p.QueuePacket(raw)
@@ -423,13 +426,13 @@ func (p *PeerConnection) SendFileStatusRequest(hash protocol.Hash) {
 	}
 }
 
-func (p *PeerConnection) SendFileStatusAnswer(transfer *Transfer) {
-	if transfer == nil {
+func (p *PeerConnection) SendFileStatusAnswer(res UploadableResource) {
+	if res == nil {
 		return
 	}
 	packet := clientproto.FileStatusAnswer{
-		Hash:     transfer.GetHash(),
-		BitField: transfer.AvailablePieces(),
+		Hash:     res.GetHash(),
+		BitField: res.AvailablePieces(),
 	}
 	if raw, err := p.combiner.Pack("client.FileStatusAnswer", &packet); err == nil {
 		p.QueuePacket(raw)
@@ -444,13 +447,13 @@ func (p *PeerConnection) SendHashSetRequest(hash protocol.Hash) {
 	}
 }
 
-func (p *PeerConnection) SendHashSetAnswer(transfer *Transfer) {
-	if transfer == nil {
+func (p *PeerConnection) SendHashSetAnswer(res UploadableResource) {
+	if res == nil {
 		return
 	}
 	packet := clientproto.HashSetAnswer{
-		Hash:  transfer.GetHash(),
-		Parts: transfer.UploadHashSet(),
+		Hash:  res.GetHash(),
+		Parts: res.UploadHashSet(),
 	}
 	if len(packet.Parts) == 0 {
 		return
@@ -517,12 +520,13 @@ func (p *PeerConnection) SendRequestParts64(packet *clientproto.RequestParts64) 
 }
 
 func (p *PeerConnection) SendPart(begin, end int64, payload []byte) error {
-	if p.transfer == nil || begin < 0 || end <= begin || len(payload) != int(end-begin) {
+	src := p.ActiveUploadSource()
+	if src == nil || begin < 0 || end <= begin || len(payload) != int(end-begin) {
 		return NewError(IllegalArgument)
 	}
-	if p.transfer.Size() <= math.MaxUint32 {
+	if src.Size() <= math.MaxUint32 {
 		packet := clientproto.SendingPart32{
-			Hash:        p.transfer.GetHash(),
+			Hash:        src.GetHash(),
 			BeginOffset: uint32(begin),
 			EndOffset:   uint32(end),
 		}
@@ -535,7 +539,7 @@ func (p *PeerConnection) SendPart(begin, end int64, payload []byte) error {
 		return nil
 	}
 	packet := clientproto.SendingPart64{
-		Hash:        p.transfer.GetHash(),
+		Hash:        src.GetHash(),
 		BeginOffset: uint64(begin),
 		EndOffset:   uint64(end),
 	}
@@ -583,16 +587,17 @@ func (p *PeerConnection) SendBlockData() {
 		p.SendOutOfPartReqsAndAddToWaitingQueue()
 		return
 	}
-	if len(p.uploadBlocks) == 0 || p.transfer == nil {
+	src := p.ActiveUploadSource()
+	if len(p.uploadBlocks) == 0 || src == nil {
 		return
 	}
 	current := p.uploadBlocks[0]
 	p.uploadBlocks = p.uploadBlocks[1:]
-	if !p.transfer.CanUploadRange(current.Begin, current.End) {
+	if !src.CanUploadRange(current.Begin, current.End) {
 		p.SendOutOfPartReqsAndAddToWaitingQueue()
 		return
 	}
-	payload, err := p.transfer.ReadRange(current.Begin, current.End)
+	payload, err := src.ReadRange(current.Begin, current.End)
 	if err != nil {
 		if q := p.session.UploadQueue(); q != nil {
 			q.RemoveFromUploadQueue(p)
@@ -643,6 +648,7 @@ func (p *PeerConnection) HandleHelloAnswer(value *clientproto.HelloAnswer) {
 	if value.Point.Defined() {
 		p.endpoint.AssignEndpoint(value.Point)
 	}
+	p.applyHelloMiscTags(&value.Properties)
 	debugPeerf("peer %s <- HelloAnswer", p.endpoint.String())
 	if p.transfer != nil {
 		p.SendFileRequest(p.transfer.GetHash())
@@ -663,6 +669,7 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 	if value.Point.Defined() {
 		p.endpoint.AssignEndpoint(value.Point)
 	}
+	p.applyHelloMiscTags(&value.Properties)
 	debugPeerf("peer %s <- Hello", p.endpoint.String())
 	answer := p.PrepareHelloAnswer()
 	if raw, err := p.combiner.Pack("client.HelloAnswer", &answer); err == nil {
@@ -670,69 +677,85 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 	}
 }
 
-func (p *PeerConnection) attachTransferByHash(hash protocol.Hash) *Transfer {
-	if p.transfer != nil && p.transfer.GetHash().Equal(hash) {
+func (p *PeerConnection) ActiveUploadSource() UploadableResource {
+	if p.transfer != nil {
 		return p.transfer
 	}
-	transfer := p.session.LookupTransfer(hash)
-	if transfer == nil || !transfer.CanUpload() {
-		return nil
+	return p.uploadResource
+}
+
+func (p *PeerConnection) SetUploadResource(res UploadableResource) {
+	p.uploadResource = res
+}
+
+func (p *PeerConnection) attachUploadByHash(hash protocol.Hash) UploadableResource {
+	if p.transfer != nil && p.transfer.GetHash().Equal(hash) && p.transfer.CanUpload() {
+		return p.transfer
 	}
-	if err := transfer.AttachIncomingPeer(p); err != nil {
-		return nil
+	if t := p.session.LookupTransfer(hash); t != nil && t.CanUpload() {
+		if err := t.AttachIncomingPeer(p); err != nil {
+			return nil
+		}
+		return t
 	}
-	return transfer
+	if sf := p.session.SharedStore().Get(hash); sf != nil && sf.CanUpload() {
+		if err := p.session.attachIncomingSharedUpload(p, sf); err != nil {
+			return nil
+		}
+		return sf
+	}
+	return nil
 }
 
 func (p *PeerConnection) HandleClientFileRequest(value *clientproto.FileRequest) {
 	if value == nil {
 		return
 	}
-	transfer := p.attachTransferByHash(value.Hash)
-	if transfer == nil {
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
 		p.Close(NoTransfer)
 		return
 	}
-	p.SendFileAnswer(transfer)
+	p.SendFileAnswer(res)
 }
 
 func (p *PeerConnection) HandleClientFileStatusRequest(value *clientproto.FileStatusRequest) {
 	if value == nil {
 		return
 	}
-	transfer := p.attachTransferByHash(value.Hash)
-	if transfer == nil {
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
 		packet := clientproto.NoFileStatus{}
 		if raw, err := p.combiner.Pack("client.NoFileStatus", &packet); err == nil {
 			p.QueuePacket(raw)
 		}
 		return
 	}
-	p.SendFileStatusAnswer(transfer)
+	p.SendFileStatusAnswer(res)
 }
 
 func (p *PeerConnection) HandleClientHashSetRequest(value *clientproto.HashSetRequest) {
 	if value == nil {
 		return
 	}
-	transfer := p.attachTransferByHash(value.Hash)
-	if transfer == nil {
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
 		p.Close(NoTransfer)
 		return
 	}
-	if len(transfer.UploadHashSet()) == 0 {
+	if len(res.UploadHashSet()) == 0 {
 		p.Close(WrongHashSet)
 		return
 	}
-	p.SendHashSetAnswer(transfer)
+	p.SendHashSetAnswer(res)
 }
 
 func (p *PeerConnection) HandleClientStartUpload(value *clientproto.StartUpload) {
 	if value == nil {
 		return
 	}
-	transfer := p.attachTransferByHash(value.Hash)
-	if transfer == nil || !transfer.CanUpload() {
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil || !res.CanUpload() {
 		p.SendQueueRanking(1)
 		return
 	}
@@ -746,11 +769,12 @@ func (p *PeerConnection) HandleClientCancelTransfer() {
 }
 
 func (p *PeerConnection) handleUploadRange(begin, end int64) error {
-	if p.transfer == nil || !p.transfer.CanUploadRange(begin, end) {
+	src := p.ActiveUploadSource()
+	if src == nil || !src.CanUploadRange(begin, end) {
 		p.SendOutOfParts()
 		return nil
 	}
-	payload, err := p.transfer.ReadRange(begin, end)
+	payload, err := src.ReadRange(begin, end)
 	if err != nil {
 		return err
 	}
@@ -761,8 +785,8 @@ func (p *PeerConnection) HandleClientRequestParts32(value *clientproto.RequestPa
 	if value == nil {
 		return nil
 	}
-	transfer := p.attachTransferByHash(value.Hash)
-	if transfer == nil {
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
 		p.SendOutOfParts()
 		return nil
 	}
@@ -772,7 +796,7 @@ func (p *PeerConnection) HandleClientRequestParts32(value *clientproto.RequestPa
 		if end <= begin {
 			continue
 		}
-		reqs, err := data.MakePeerRequests(begin, end, transfer.Size())
+		reqs, err := data.MakePeerRequests(begin, end, res.Size())
 		if err != nil {
 			return err
 		}
@@ -787,8 +811,8 @@ func (p *PeerConnection) HandleClientRequestParts64(value *clientproto.RequestPa
 	if value == nil {
 		return nil
 	}
-	transfer := p.attachTransferByHash(value.Hash)
-	if transfer == nil {
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
 		p.SendOutOfParts()
 		return nil
 	}
@@ -798,7 +822,7 @@ func (p *PeerConnection) HandleClientRequestParts64(value *clientproto.RequestPa
 		if end <= begin {
 			continue
 		}
-		reqs, err := data.MakePeerRequests(begin, end, transfer.Size())
+		reqs, err := data.MakePeerRequests(begin, end, res.Size())
 		if err != nil {
 			return err
 		}
@@ -831,6 +855,7 @@ func (p *PeerConnection) HandleFileStatusAnswer(value *clientproto.FileStatusAns
 	} else if p.transfer != nil {
 		if p.transfer.GetHash().Equal(value.Hash) {
 			p.transfer.SetHashSet(value.Hash, []protocol.Hash{value.Hash})
+			p.maybeSendRequestSources2()
 			p.SendStartUpload(p.transfer.GetHash())
 		} else {
 			p.Close(HashMismatch)
@@ -874,6 +899,7 @@ func (p *PeerConnection) ProcessIncoming() error {
 					p.transfer.GetHash().Equal(protocol.HashFromHashSet(value.Parts)) &&
 					p.transfer.picker.GetPieceCount() == len(value.Parts) {
 					p.transfer.SetHashSet(value.Hash, value.Parts)
+					p.maybeSendRequestSources2()
 					p.SendStartUpload(p.transfer.GetHash())
 				} else {
 					p.Close(WrongHashSet)
@@ -917,6 +943,10 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.Close(NoTransfer)
 		case *clientproto.OutOfParts:
 			p.Close(OutOfParts)
+		case *clientproto.RequestSources2:
+			p.HandleRequestSources2(value)
+		case *clientproto.AnswerSources2:
+			p.HandleAnswerSources2(value)
 		}
 	}
 	return nil
@@ -928,6 +958,7 @@ func (p *PeerConnection) SetPeer(peer *Peer) {
 
 func (p *PeerConnection) SetTransfer(transfer *Transfer) {
 	p.transfer = transfer
+	p.uploadResource = nil
 }
 
 func (p *PeerConnection) GetInfo() PeerInfo {
@@ -1194,8 +1225,8 @@ func (p *PeerConnection) UploadScore() uint32 {
 	}
 	base := float64(CurrentTime()-waitStart) / 1000.0
 	base *= p.session.Credits().ScoreRatio(p.remoteHash)
-	if p.transfer != nil {
-		base *= p.transfer.UploadPriority().ScoreFactor()
+	if src := p.ActiveUploadSource(); src != nil {
+		base *= src.UploadPriority().ScoreFactor()
 	}
 	if base < 0 {
 		return 0
@@ -1216,4 +1247,143 @@ func (p *PeerConnection) removePending(block data.PieceBlock) {
 func (p *PeerConnection) asyncWrite(block data.PieceBlock, buffer []byte, transfer *Transfer) {
 	transfer.picker.MarkAsWriting(block)
 	p.session.SubmitDiskTask(NewAsyncWrite(block, buffer, transfer))
+}
+
+func (p *PeerConnection) applyHelloMiscTags(props *protocol.TagList) {
+	if props == nil {
+		return
+	}
+	for _, t := range *props {
+		if t.Type != protocol.TagTypeUint32 {
+			continue
+		}
+		switch t.ID {
+		case 0xFA:
+			p.remotePeerInfo.Misc1.Assign(int(t.UInt32))
+		case 0xFE:
+			p.remotePeerInfo.Misc2.Assign(int(t.UInt32))
+		}
+	}
+}
+
+func (p *PeerConnection) maybeSendRequestSources2() {
+	if p.sourceExchangeSent || p.transfer == nil {
+		return
+	}
+	if p.remotePeerInfo.Misc1.SourceExchange1Ver == 0 {
+		return
+	}
+	if err := p.SendRequestSources2(p.transfer.GetHash()); err != nil {
+		return
+	}
+	p.sourceExchangeSent = true
+}
+
+func (p *PeerConnection) SendRequestSources2(hash protocol.Hash) error {
+	pkt := clientproto.RequestSources2{
+		Version:  clientproto.SourceExchange2Version,
+		Reserved: 0,
+		Hash:     hash,
+	}
+	raw, err := p.combiner.Pack("client.RequestSources2", &pkt)
+	if err != nil {
+		return err
+	}
+	debugPeerf("peer %s -> RequestSources2", p.endpoint.String())
+	p.QueuePacket(raw)
+	return nil
+}
+
+func (p *PeerConnection) HandleRequestSources2(req *clientproto.RequestSources2) {
+	if req == nil {
+		return
+	}
+	res := p.attachUploadByHash(req.Hash)
+	tf, ok := res.(*Transfer)
+	if !ok || tf == nil {
+		return
+	}
+	peers := tf.policy.PeersForSourceExchange(p.endpoint, SourceExchangePeerLimit)
+	if len(peers) == 0 {
+		return
+	}
+	entries := p.buildSourceExchangeEntries(peers)
+	ans := clientproto.AnswerSources2{
+		Version: clientproto.SourceExchange2Version,
+		Hash:    req.Hash,
+		Entries: entries,
+	}
+	raw, err := p.combiner.Pack("client.AnswerSources2", &ans)
+	if err != nil {
+		return
+	}
+	debugPeerf("peer %s -> AnswerSources2 entries=%d", p.endpoint.String(), len(entries))
+	p.QueuePacket(raw)
+}
+
+func (p *PeerConnection) buildSourceExchangeEntries(peers []Peer) []clientproto.SourceExchangeEntry {
+	sx1 := p.remotePeerInfo.Misc1.SourceExchange1Ver
+	out := make([]clientproto.SourceExchangeEntry, 0, len(peers))
+	for _, pe := range peers {
+		uid := uint32(pe.Endpoint.IP())
+		if sx1 <= 2 {
+			uid = clientproto.SwapUint32(uid)
+		}
+		out = append(out, clientproto.SourceExchangeEntry{
+			UserID:       uid,
+			TCPPort:      uint16(pe.Endpoint.Port()),
+			ServerIP:     0,
+			ServerPort:   0,
+			UserHash:     protocol.Invalid,
+			CryptOptions: 0,
+		})
+	}
+	return out
+}
+
+func (p *PeerConnection) HandleAnswerSources2(ans *clientproto.AnswerSources2) {
+	if ans == nil || p.transfer == nil {
+		return
+	}
+	if !ans.Hash.Equal(p.transfer.GetHash()) {
+		return
+	}
+	peers := make([]Peer, 0, len(ans.Entries))
+	for _, e := range ans.Entries {
+		ep := endpointFromSourceExchangeEntry(e.UserID, e.TCPPort, ans.Version)
+		if !p.isAcceptableSourceExchangeEndpoint(ep) {
+			continue
+		}
+		peers = append(peers, NewPeerWithSource(ep, true, int(PeerSourceExchange)))
+	}
+	if n := p.transfer.policy.MergeSourceExchangePeers(peers); n > 0 {
+		debugPeerf("peer %s <- AnswerSources2 merged=%d", p.endpoint.String(), n)
+	}
+}
+
+func endpointFromSourceExchangeEntry(dwID uint32, port uint16, packetVer byte) protocol.Endpoint {
+	var ipU32 uint32
+	if packetVer >= 3 {
+		ipU32 = clientproto.SwapUint32(dwID)
+	} else {
+		ipU32 = dwID
+	}
+	return protocol.NewEndpoint(int32(ipU32), int(port))
+}
+
+func (p *PeerConnection) isAcceptableSourceExchangeEndpoint(ep protocol.Endpoint) bool {
+	if !ep.Defined() {
+		return false
+	}
+	if IsLocalAddress(ep.IP()) {
+		return false
+	}
+	self := protocol.NewEndpoint(p.session.GetClientID(), p.session.GetListenPort())
+	if ep.Equal(self) {
+		return false
+	}
+	if ep.Equal(p.endpoint) {
+		return false
+	}
+	return true
 }

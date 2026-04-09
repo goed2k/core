@@ -58,7 +58,8 @@ func (q *UploadQueue) AddClientToQueue(client *PeerConnection) {
 		client.SendAcceptUpload()
 		return
 	}
-	if client.transfer == nil || q.isSuspended(client.transfer.GetHash()) {
+	src := client.ActiveUploadSource()
+	if src == nil || q.isSuspended(src.GetHash()) {
 		return
 	}
 	if q.session != nil && q.session.settings.UploadQueueSize > 0 && len(q.waiting) >= q.session.settings.UploadQueueSize {
@@ -234,13 +235,17 @@ func (q *UploadQueue) CheckForTimeOver(client *PeerConnection) bool {
 	if client.FriendSlot() {
 		return false
 	}
-	if client.transfer != nil && client.transfer.UploadPriority() == UploadPriorityPowerShare {
+	if src := client.ActiveUploadSource(); src != nil && src.UploadPriority() == UploadPriorityPowerShare {
 		vips := 0
 		for _, current := range q.uploading {
 			if current == nil {
 				continue
 			}
-			if current.FriendSlot() || (current.transfer != nil && current.transfer.UploadPriority() == UploadPriorityPowerShare) {
+			if current.FriendSlot() {
+				vips++
+				continue
+			}
+			if curSrc := current.ActiveUploadSource(); curSrc != nil && curSrc.UploadPriority() == UploadPriorityPowerShare {
 				vips++
 			}
 		}
@@ -310,7 +315,11 @@ func (q *UploadQueue) SuspendUpload(hash protocol.Hash, terminate bool) uint16 {
 	}
 	removed := uint16(0)
 	for _, client := range append([]*PeerConnection(nil), q.uploading...) {
-		if client == nil || client.transfer == nil || !client.transfer.GetHash().Equal(hash) {
+		if client == nil {
+			continue
+		}
+		src := client.ActiveUploadSource()
+		if src == nil || !src.GetHash().Equal(hash) {
 			continue
 		}
 		q.RemoveFromUploadQueue(client)

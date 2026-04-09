@@ -746,6 +746,7 @@ func (t *Transfer) finished() {
 	t.state = Finished
 	if t.session != nil {
 		t.session.SubmitDiskTask(NewAsyncRelease(t, false))
+		t.session.tryAddCompletedTransferToSharedStore(t)
 		t.session.PublishTransferToServer(t)
 		t.session.PublishTransferToKAD(t)
 	}
