@@ -41,33 +41,59 @@ func (s *Session) AddSharedDir(path string) error {
 		return NewError(IllegalArgument)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, existing := range s.sharedDirs {
 		if strings.EqualFold(existing, abs) {
+			s.mu.Unlock()
 			return nil
 		}
 	}
 	s.sharedDirs = append(s.sharedDirs, abs)
+	s.mu.Unlock()
+	// 扫描由 Client.AddSharedDir 异步触发，避免大目录阻塞 RPC 超时。
 	return nil
 }
 
-// RemoveSharedDir 移除扫描目录。
+// RemoveSharedDir 移除扫描目录，并删除共享库中路径落在该目录下的条目（与列表一致）。
 func (s *Session) RemoveSharedDir(path string) error {
 	abs, err := normalizeSharedPath(path)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	dst := s.sharedDirs[:0]
+	removed := false
 	for _, d := range s.sharedDirs {
 		if strings.EqualFold(d, abs) {
+			removed = true
 			continue
 		}
 		dst = append(dst, d)
 	}
 	s.sharedDirs = dst
+	s.mu.Unlock()
+	if removed {
+		s.pruneSharedFilesUnderRoot(abs)
+	}
 	return nil
+}
+
+func (s *Session) pruneSharedFilesUnderRoot(root string) {
+	if s == nil || s.sharedStore == nil {
+		return
+	}
+	list := s.sharedStore.List()
+	var toRemove []protocol.Hash
+	for _, sf := range list {
+		if sf == nil {
+			continue
+		}
+		if pathIsUnderRoot(sf.Path, root) {
+			toRemove = append(toRemove, sf.Hash)
+		}
+	}
+	for _, h := range toRemove {
+		s.sharedStore.Remove(h)
+	}
 }
 
 // ListSharedDirs 返回已注册的共享目录副本。
@@ -118,31 +144,32 @@ func (s *Session) ImportSharedFile(path string) error {
 	return nil
 }
 
-// RescanSharedDirs 扫描已注册目录下的普通文件并导入。
+// RescanSharedDirs 递归扫描已注册目录下的普通文件并导入（与 eMule 共享文件夹行为一致）。
 func (s *Session) RescanSharedDirs() error {
 	if s == nil {
 		return NewError(InternalError)
 	}
 	dirs := s.ListSharedDirs()
 	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
+		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if isSkippableSharedFileName(d.Name()) {
+				return nil
+			}
+			fi, err := d.Info()
+			if err != nil || fi.Size() == 0 {
+				return nil
+			}
+			_ = s.ImportSharedFile(path)
+			return nil
+		})
 		if err != nil {
 			return err
-		}
-		for _, ent := range entries {
-			if ent.IsDir() {
-				continue
-			}
-			name := ent.Name()
-			if isSkippableSharedFileName(name) {
-				continue
-			}
-			full := filepath.Join(dir, name)
-			fi, err := ent.Info()
-			if err != nil || fi.Size() == 0 {
-				continue
-			}
-			_ = s.ImportSharedFile(full)
 		}
 	}
 	return nil

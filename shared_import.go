@@ -47,3 +47,29 @@ func validateSharedFileOnDisk(sf *SharedFile) bool {
 	}
 	return true
 }
+
+// pathIsUnderRoot 判断 filePath 是否位于 rootDir 目录之下（含根目录的直接子路径，不含 root 自身作为文件路径的歧义）。
+// 用于移除共享目录时清理该目录下索引的共享文件。
+func pathIsUnderRoot(filePath, rootDir string) bool {
+	if filePath == "" || rootDir == "" {
+		return false
+	}
+	f, err := filepath.Abs(filePath)
+	if err != nil {
+		return false
+	}
+	r, err := filepath.Abs(rootDir)
+	if err != nil {
+		return false
+	}
+	f = filepath.Clean(f)
+	r = filepath.Clean(r)
+	rel, err := filepath.Rel(r, f)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}

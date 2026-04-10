@@ -19,6 +19,11 @@ func (c *Client) AddSharedDir(path string) error {
 	}
 	_ = c.saveStateIfConfigured()
 	c.emitStatusUpdate()
+	go func() {
+		_ = c.session.RescanSharedDirs()
+		_ = c.saveStateIfConfigured()
+		c.emitStatusUpdate()
+	}()
 	return nil
 }
 
