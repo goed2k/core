@@ -32,6 +32,9 @@ type PeerInfo struct {
 	ModVersion           int
 	StrModVersion        string
 	SourceFlag           int
+	// HelloMisc1 / HelloMisc2 为对端 Hello/HelloAnswer 标签 0xFA / 0xFE 解析后的原始数值（与 eMule Misc 位域一致）。
+	HelloMisc1 int
+	HelloMisc2 int
 }
 
 func PeerSourceLabels(sourceFlag int) []string {

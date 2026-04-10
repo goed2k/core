@@ -132,7 +132,7 @@ import "github.com/goed2k/core"
 - `GetStatus` / `GetPeersInfo` — 任务级状态与**当前已连接对等端**列表
 - `IsPaused` / `IsFinished` / …（见源码 `transfer_handle.go`）
 
-**对等端信息**：`GetPeersInfo() []PeerInfo` 中每条包含速率、Endpoint、`UserHash`、`NickName`（Hello 解析）、`ModName` / `Version` / `StrModVersion`、`Connected`、与该用户累计上下传 `TotalUploaded` / `TotalDownloaded`（与积分一致）等。
+**对等端信息**：`GetPeersInfo() []PeerInfo` 中每条包含速率、Endpoint、`UserHash`、`NickName`（Hello 解析）、`ModName` / `Version` / `ModVersion` / `StrModVersion`、`Connected`、与该用户累计上下传 `TotalUploaded` / `TotalDownloaded`（与积分一致），以及 Hello 标签 **0xFA / 0xFE** 对应的原始值 `HelloMisc1` / `HelloMisc2`（与 `MiscOptions` / `MiscOptions2` 位域一致）等。
 
 ## Session：常见用法
 

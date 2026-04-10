@@ -997,6 +997,8 @@ func (p *PeerConnection) GetInfo() PeerInfo {
 	info.Version = p.remotePeerInfo.Version
 	info.ModVersion = p.remotePeerInfo.ModNumber
 	info.StrModVersion = p.remotePeerInfo.ModVersion
+	info.HelloMisc1 = p.remotePeerInfo.Misc1.IntValue()
+	info.HelloMisc2 = p.remotePeerInfo.Misc2.Value
 	return info
 }
 
