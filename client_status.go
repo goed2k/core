@@ -10,6 +10,8 @@ import (
 type ServerSnapshot struct {
 	Identifier                   string
 	Address                      string
+	Name                         string
+	Description                  string
 	Configured                   bool
 	Connected                    bool
 	HandshakeCompleted           bool
@@ -18,9 +20,21 @@ type ServerSnapshot struct {
 	ClientID                     int32
 	TCPFlags                     int32
 	AuxPort                      int32
+	ReportedIP                   uint32
+	ObfuscationTCPPort           uint32
 	MillisecondsSinceLastReceive int64
 	DownloadRate                 int
 	UploadRate                   int
+	// TCP Status（0x34）用户数 / 文件数
+	StatusUsers int32
+	StatusFiles int32
+	// UDP GlobServStat（需本机 UDP 端口可用；与 DHT 共用）
+	UDPUsers       uint32
+	UDPFiles       uint32
+	MaxUsers       uint32
+	SoftFilesLimit uint32
+	HardFilesLimit uint32
+	UDPStatsValid  bool
 }
 
 func (s ServerSnapshot) IDClass() string {
@@ -160,6 +174,14 @@ func (s *Session) ServerSnapshots() []ServerSnapshot {
 		servers[identifier] = connection
 	}
 	primary := s.serverConnection
+	meta := make(map[string]serverMetEntryMeta, len(s.serverMetMeta))
+	for k, v := range s.serverMetMeta {
+		meta[k] = v
+	}
+	udp := make(map[string]serverUDPStats, len(s.udpServerStats))
+	for k, v := range s.udpServerStats {
+		udp[k] = v
+	}
 	s.mu.Unlock()
 
 	identifiers := make([]string, 0, len(configured)+len(servers))
@@ -188,6 +210,18 @@ func (s *Session) ServerSnapshots() []ServerSnapshot {
 			snapshot.Address = address
 			snapshot.Configured = true
 		}
+		if m, ok := meta[identifier]; ok {
+			snapshot.Name = m.Name
+			snapshot.Description = m.Description
+		}
+		if u, ok := udp[identifier]; ok && u.Valid {
+			snapshot.UDPUsers = u.Users
+			snapshot.UDPFiles = u.Files
+			snapshot.MaxUsers = u.MaxUsers
+			snapshot.SoftFilesLimit = u.SoftFiles
+			snapshot.HardFilesLimit = u.HardFiles
+			snapshot.UDPStatsValid = true
+		}
 		if sc != nil {
 			stats := sc.Statistics()
 			if snapshot.Address == "" && sc.GetAddress() != nil {
@@ -200,9 +234,13 @@ func (s *Session) ServerSnapshots() []ServerSnapshot {
 			snapshot.ClientID = sc.ClientID()
 			snapshot.TCPFlags = sc.TCPFlags()
 			snapshot.AuxPort = sc.AuxPort()
+			snapshot.ReportedIP = sc.reportedIP
+			snapshot.ObfuscationTCPPort = sc.obfuscationTCPPort
 			snapshot.MillisecondsSinceLastReceive = sc.MillisecondsSinceLastReceive()
 			snapshot.DownloadRate = int(stats.DownloadRate())
 			snapshot.UploadRate = int(stats.UploadRate())
+			snapshot.StatusUsers = sc.statusUsers
+			snapshot.StatusFiles = sc.statusFiles
 		}
 		snapshots = append(snapshots, snapshot)
 	}

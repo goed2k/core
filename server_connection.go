@@ -16,7 +16,12 @@ type ServerConnection struct {
 	clientID           int32
 	tcpFlags           int32
 	auxPort            int32
-	combiner           protocol.PacketCombiner
+	reportedIP         uint32
+	obfuscationTCPPort uint32
+	statusUsers          int32
+	statusFiles          int32
+	lastGlobUDPQuery     int64
+	combiner             protocol.PacketCombiner
 }
 
 func NewServerConnection(identifier string, address *net.TCPAddr, session *Session) *ServerConnection {
@@ -40,11 +45,13 @@ func (s *ServerConnection) Connect() error {
 	return nil
 }
 
-func (s *ServerConnection) OnServerIDChange(clientID, tcpFlags, auxPort int32) {
+func (s *ServerConnection) OnServerIDChange(clientID, tcpFlags, auxPort int32, reportedIP, obfuscationTCPPort uint32) {
 	debugPeerf("server %s <- IdChange clientID=%d", s.identifier, clientID)
 	s.clientID = clientID
 	s.tcpFlags = tcpFlags
 	s.auxPort = auxPort
+	s.reportedIP = reportedIP
+	s.obfuscationTCPPort = obfuscationTCPPort
 	s.handshakeCompleted = true
 	s.session.OnServerIDChange(s, clientID, tcpFlags, auxPort)
 }
@@ -142,7 +149,7 @@ func (s *ServerConnection) ProcessIncoming() error {
 	for _, packet := range packets {
 		switch value := packet.(type) {
 		case *serverproto.IdChange:
-			s.OnServerIDChange(value.ClientID, value.TCPFlags, value.AuxPort)
+			s.OnServerIDChange(value.ClientID, value.TCPFlags, value.AuxPort, value.ReportedIP, value.ObfuscationTCPPort)
 		case *serverproto.FoundFileSources:
 			debugPeerf("server %s <- FoundFileSources hash=%s count=%d", s.identifier, value.Hash.String(), len(value.Sources))
 			if transfer := s.session.LookupTransfer(value.Hash); transfer != nil {
@@ -157,7 +164,9 @@ func (s *ServerConnection) ProcessIncoming() error {
 		case *serverproto.CallbackRequestFailed:
 			debugPeerf("server %s <- CallbackRequestFailed", s.identifier)
 		case *serverproto.Status:
-			debugPeerf("server %s <- Status", s.identifier)
+			debugPeerf("server %s <- Status users=%d files=%d", s.identifier, value.UsersCount, value.FilesCount)
+			s.statusUsers = value.UsersCount
+			s.statusFiles = value.FilesCount
 		case *serverproto.Message:
 			debugPeerf("server %s <- Message %q", s.identifier, value.AsString())
 		case *serverproto.SearchResult:

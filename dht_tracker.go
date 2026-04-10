@@ -29,6 +29,7 @@ type DHTTracker struct {
 	stopCh              chan struct{}
 	startOnce           sync.Once
 	closeOnce           sync.Once
+	ed2kUDPHandler      func(*net.UDPAddr, []byte)
 	lastBootstrap       time.Time
 	lastRefresh         time.Time
 	lastFirewalledCheck time.Time
@@ -88,6 +89,20 @@ func (t *DHTTracker) Close() {
 			_ = t.conn.Close()
 		}
 	})
+}
+
+// UDPConn 返回 Kad 监听的 UDP 套接字（供 Session 发送 GlobServStat 等 eD2k UDP 包）。
+func (t *DHTTracker) UDPConn() *net.UDPConn {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.conn
+}
+
+// SetED2KUDPHandler 在非 Kad 包（首字节 0xe3）到达时回调，例如 OP_GLOBSERVSTATRES。
+func (t *DHTTracker) SetED2KUDPHandler(h func(*net.UDPAddr, []byte)) {
+	t.mu.Lock()
+	t.ed2kUDPHandler = h
+	t.mu.Unlock()
 }
 
 func (t *DHTTracker) AddNode(addr *net.UDPAddr) {
@@ -202,6 +217,15 @@ func (t *DHTTracker) readLoop() {
 			continue
 		}
 		addr = normalizeUDPAddr(addr)
+		if n >= 26 && buffer[0] == 0xe3 {
+			t.mu.Lock()
+			h := t.ed2kUDPHandler
+			t.mu.Unlock()
+			if h != nil {
+				h(addr, buffer[:n])
+			}
+			continue
+		}
 		opcode, message, err := t.combiner.Unpack(buffer[:n])
 		if err != nil {
 			continue

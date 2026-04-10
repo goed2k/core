@@ -153,7 +153,7 @@ up, down := s.Credits().TotalsForPeer(peerUserHash)
 - `ClientStatus`：`Servers`、`Transfers`（含每任务 `Peers []PeerInfo`）、`Peers`（扁平的所有对等端）、总进度与速率等。  
 - `TransferSnapshot`：单任务文件名、大小、`Status`、`Peers`、`Pieces` 等。  
 - `PeerInfo`：见上一节；适合用来做列表 UI 或日志。  
-- `ServerSnapshot`：某台 ED2K 服务器的连接与统计信息。  
+- `ServerSnapshot`：某台 ED2K 服务器的连接与统计信息；含 `server.met` 中的名称与描述（`ConnectServerMet` 时写入）、TCP `Status`（0x34）用户数/文件数、扩展 `IdChange` 中的 `ObfuscationTCPPort`/`ReportedIP`，以及通过 UDP `GlobServStat`（与 DHT 共用本机 UDP 端口，或未启用 DHT 时单独绑定）获取的用户/文件/最大用户/软硬性文件限制等。  
 - `DHTStatus`：Kad 节点规模、是否 firewalled 等（**不是**「ED2K 好友列表」）。
 
 ## 示例程序

@@ -45,6 +45,25 @@ type Session struct {
 	lastKadPeriodicPublishAt int64
 	sharedStore              *SharedStore
 	sharedDirs               []string
+	serverMetMeta     map[string]serverMetEntryMeta
+	globUDPChallenge  map[uint32]string
+	udpServerStats    map[string]serverUDPStats
+	serverStatUDPConn *net.UDPConn
+	serverStatUDPStop chan struct{}
+	listenPortWasDynamic bool
+}
+
+type serverMetEntryMeta struct {
+	Name, Description string
+}
+
+type serverUDPStats struct {
+	Users     uint32
+	Files     uint32
+	MaxUsers  uint32
+	SoftFiles uint32
+	HardFiles uint32
+	Valid     bool
 }
 
 type diskTask struct {
@@ -366,6 +385,7 @@ func (s *Session) Listen() error {
 	if port < 0 {
 		return nil
 	}
+	listenPortWasDynamic := port == 0
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: port})
 	if err != nil {
 		return err
@@ -373,6 +393,7 @@ func (s *Session) Listen() error {
 	if addr, ok := listener.Addr().(*net.TCPAddr); ok {
 		s.mu.Lock()
 		s.settings.ListenPort = addr.Port
+		s.listenPortWasDynamic = listenPortWasDynamic
 		s.mu.Unlock()
 	}
 	s.listener = listener
@@ -436,6 +457,7 @@ func (s *Session) SecondTick(currentSessionTime, tickIntervalMS int64) {
 	}
 	s.tickSearches(currentSessionTime)
 	s.maybePeriodicKadPublish(currentSessionTime)
+	s.maybePollServerGlobUDP(currentSessionTime)
 	s.processDiskTasks()
 	s.accumulator.SecondTick(tickIntervalMS)
 	s.ConnectNewPeers()
@@ -851,6 +873,11 @@ func (s *Session) diskTaskCount() int {
 
 func (s *Session) SetDHTTracker(tracker *DHTTracker) {
 	s.dhtTracker = tracker
+	if tracker != nil {
+		tracker.SetED2KUDPHandler(func(addr *net.UDPAddr, buf []byte) {
+			s.handleGlobServStatUDP(addr, buf)
+		})
+	}
 }
 
 func (s *Session) GetDHTTracker() *DHTTracker {

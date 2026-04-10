@@ -201,6 +201,10 @@ func (c *Client) Start() error {
 		if err != nil {
 			return
 		}
+		if err = c.session.EnsureServerStatUDPListener(); err != nil {
+			c.session.CloseListener()
+			return
+		}
 		if tracker := c.GetDHTTracker(); tracker != nil {
 			if startErr := tracker.Start(); startErr != nil {
 				err = startErr
@@ -255,6 +259,7 @@ func (c *Client) Stop() error {
 	c.closeOnce.Do(func() {
 		if c.started {
 			close(c.stopCh)
+			c.session.closeServerStatUDPListener()
 			if tracker := c.GetDHTTracker(); tracker != nil {
 				tracker.Close()
 			}
@@ -265,6 +270,7 @@ func (c *Client) Stop() error {
 			case <-time.After(2 * time.Second):
 			}
 		} else {
+			c.session.closeServerStatUDPListener()
 			if tracker := c.GetDHTTracker(); tracker != nil {
 				tracker.Close()
 			}
@@ -340,7 +346,21 @@ func (c *Client) ConnectServerMet(path string) error {
 	if err != nil {
 		return err
 	}
-	return c.ConnectServers(met.Addresses()...)
+	for _, e := range met.Servers {
+		addr := e.Address()
+		if addr == "" {
+			continue
+		}
+		c.session.SetServerMetadata(addr, e.Name(), e.Description())
+		tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			return err
+		}
+		if err := c.session.ConnectTo(addr, tcpAddr); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) ConnectServerLink(linkValue string) error {
