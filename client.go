@@ -320,6 +320,11 @@ func (c *Client) DHTStatus() DHTStatus {
 	return DHTStatus{}
 }
 
+// DHTEnabled 返回 settings 中是否启用 DHT（与 UDP 是否已成功监听无关）。
+func (c *Client) DHTEnabled() bool {
+	return c != nil && c.session != nil && c.session.settings.EnableDHT
+}
+
 func (c *Client) Start() error {
 	var err error
 	c.startOnce.Do(func() {
