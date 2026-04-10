@@ -43,6 +43,24 @@ func TestSearchEntryExtractsSourceEndpoint(t *testing.T) {
 	}
 }
 
+func TestSearchEntryExtractsLowIDSourceEndpoint(t *testing.T) {
+	// eMule 常见：SourceType=2（LowID），此前被错误拒绝导致 Kad 来源数为 0
+	entry := SearchEntry{
+		Tags: []Tag{
+			{ID: TagSourceType, UInt64: 2},
+			{ID: TagSourceIP, UInt64: uint64(uint32(0x0100007f))},
+			{ID: TagSourcePort, UInt64: 4662},
+		},
+	}
+	endpoint, ok := entry.SourceEndpoint()
+	if !ok {
+		t.Fatal("expected low-id source endpoint")
+	}
+	if endpoint.Port() != 4662 {
+		t.Fatalf("unexpected port %d", endpoint.Port())
+	}
+}
+
 func TestBootstrapResRoundTrip(t *testing.T) {
 	packet, err := BootstrapRes{
 		ID:      NewID(protocol.MustHashFromString("23A8CEFF57A7A32D562D649ED7893796")),

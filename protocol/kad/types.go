@@ -288,13 +288,21 @@ func (s SearchEntry) StringTag(id byte) (string, bool) {
 }
 
 func (s SearchEntry) SourceEndpoint() (protocol.Endpoint, bool) {
-	sourceType, _ := s.UIntTag(TagSourceType)
 	ip, hasIP := s.UIntTag(TagSourceIP)
 	port, hasPort := s.UIntTag(TagSourcePort)
+	if !hasPort {
+		// 部分客户端只带 UDP 端口标签
+		port, hasPort = s.UIntTag(TagSourceUPort)
+	}
 	if !hasIP || !hasPort {
 		return protocol.Endpoint{}, false
 	}
-	if sourceType != 1 && sourceType != 4 && sourceType != 0 {
+	if ip == 0 || port == 0 {
+		return protocol.Endpoint{}, false
+	}
+	// eMule：1=HighID 2=LowID 3=回调 等。旧逻辑只接受 0/1/4，会丢弃绝大多数 LowID 来源。
+	sourceType, hasType := s.UIntTag(TagSourceType)
+	if hasType && sourceType > 0x20 {
 		return protocol.Endpoint{}, false
 	}
 	return protocol.NewEndpoint(int32(uint32(ip)), int(port)), true
