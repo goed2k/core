@@ -14,6 +14,14 @@ import (
 
 const InvalidETA int64 = -1
 
+// 向 ED2K 服务器请求文件源（GetFileSources）的重试间隔，对齐 aMule
+// include/protocol/ed2k/Constants.h：FILEREASKTIME、SERVERREASKTIME。
+// 秒级重试易被服务器忽略或触发限流。
+const (
+	fileReaskServerTCPMS = 1_300_000 // FILEREASKTIME（约 21.7 分钟）
+	serverReaskTCPMS     = 800_000  // SERVERREASKTIME（约 13.3 分钟），无活跃连接与候选时略缩短
+)
+
 type Transfer struct {
 	hash               protocol.Hash
 	aichRoot           protocol.AICHHash
@@ -635,20 +643,17 @@ func (t *Transfer) ForceSourceDiscoveryNow() {
 
 func (t *Transfer) nextServerSourcesInterval(activeConnections, connectCandidates int, sent bool) int64 {
 	if sent {
-		nextInterval := Minutes(1)
 		if activeConnections == 0 && connectCandidates == 0 {
-			nextInterval = Seconds(5)
-		} else if activeConnections <= 1 || connectCandidates <= 1 {
-			nextInterval = Seconds(10)
+			return serverReaskTCPMS
 		}
-		return nextInterval
+		return fileReaskServerTCPMS
 	}
 
-	// No handshake-complete server is available or the request could not be queued.
+	// 无握手完成的服务器或请求未能入队：较快重试以便连上服务器，但仍避免秒级风暴
 	if activeConnections == 0 && connectCandidates == 0 {
-		return Seconds(5)
+		return Seconds(30)
 	}
-	return Seconds(10)
+	return Minutes(1)
 }
 
 func (t *Transfer) nextDHTSourcesInterval(activeConnections, connectCandidates int, sent bool) int64 {
@@ -756,7 +761,9 @@ func (t *Transfer) SecondTick(accumulator *Statistics, tickIntervalMS int64) {
 		now := CurrentTime()
 		activeConnections := t.ActiveConnections()
 		connectCandidates := t.policy.NumConnectCandidates()
-		if activeConnections <= 1 && connectCandidates <= 1 && t.nextSourcesRequest > now+Seconds(5) {
+		// 仅在“已排到极远的未来”（例如 resume 残留）时提前到本轮；阈值必须 ≥ 成功入队后的最大间隔，
+		// 否则会与 fileReaskServerTCPMS 冲突，在缺源状态下每秒向服务器重发。
+		if activeConnections <= 1 && connectCandidates <= 1 && t.nextSourcesRequest > now+fileReaskServerTCPMS {
 			t.nextSourcesRequest = now
 		}
 		if activeConnections <= 1 && connectCandidates <= 1 && t.nextDHTRequest > now+Seconds(10) {

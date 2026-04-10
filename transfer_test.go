@@ -113,22 +113,24 @@ func TestTransferStatsDropRateAfterPeerDisconnect(t *testing.T) {
 	}
 }
 
-func TestTransferRequestsSourcesSoonWhenNoActivePeersRemain(t *testing.T) {
+func TestTransferRequestsSourcesWhenNoActivePeersRemainUsesEmuleServerReask(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	serverAddr := &net.TCPAddr{IP: net.IPv4(45, 82, 80, 155), Port: 5687}
 	session.serverConnection = NewServerConnection("test", serverAddr, session)
 	session.serverConnection.handshakeCompleted = true
 
 	now := CurrentTime()
-	transfer.nextSourcesRequest = now + Minutes(1)
+	// 已到发送时间；若设为仅数分钟后，则不会触发「排期过远」提前逻辑，本轮不会发 GetFileSources
+	transfer.nextSourcesRequest = now
 	transfer.nextDHTRequest = now + Minutes(10)
 	transfer.SecondTick(nil, 1000)
 
 	if got := len(session.serverConnection.PendingPackets()); got == 0 {
 		t.Fatal("expected queued GetFileSources packet when no active peers remain")
 	}
-	if transfer.nextSourcesRequest-now > Seconds(5) {
-		t.Fatalf("expected next source retry within 5s, got %dms", transfer.nextSourcesRequest-now)
+	// 与 aMule SERVERREASKTIME 对齐（无连接、无候选时）
+	if d := transfer.nextSourcesRequest - now; d < serverReaskTCPMS-Seconds(2) || d > serverReaskTCPMS+Seconds(2) {
+		t.Fatalf("expected next server reask ~%dms (SERVERREASKTIME), got %dms", serverReaskTCPMS, d)
 	}
 	if transfer.nextDHTRequest-now > Seconds(10) {
 		t.Fatalf("expected next DHT retry within 10s, got %dms", transfer.nextDHTRequest-now)
