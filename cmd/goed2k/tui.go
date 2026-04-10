@@ -955,8 +955,12 @@ func (m tuiModel) renderPeerSection(transfer ed2k.TransferSnapshot, width int) s
 	limit := minInt(len(peers), 8)
 	for i := 0; i < limit; i++ {
 		peer := peers[i]
+		who := peer.Peer.Endpoint.String()
+		if peer.Peer.NickName != "" {
+			who = peer.Peer.NickName + " " + who
+		}
 		lines = append(lines, fmt.Sprintf("%s  down=%s up=%s src=%s fail=%d",
-			peer.Peer.Endpoint.String(),
+			who,
 			humanRate(peer.Peer.DownloadSpeed),
 			humanRate(peer.Peer.UploadSpeed),
 			peer.Peer.SourceString(),

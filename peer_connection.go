@@ -3,6 +3,7 @@ package goed2k
 import (
 	"bytes"
 	"compress/zlib"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -102,6 +103,7 @@ func (m *MiscOptions2) Assign(value int)           { m.Value = value }
 
 type RemotePeerInfo struct {
 	Point      protocol.Endpoint
+	NickName   string
 	ModName    string
 	Version    int
 	ModVersion string
@@ -657,7 +659,7 @@ func (p *PeerConnection) HandleHelloAnswer(value *clientproto.HelloAnswer) {
 	if value.Point.Defined() {
 		p.endpoint.AssignEndpoint(value.Point)
 	}
-	p.applyHelloMiscTags(&value.Properties)
+	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
 	debugPeerf("peer %s <- HelloAnswer", p.endpoint.String())
 	if p.transfer != nil {
 		p.SendFileRequest(p.transfer.GetHash())
@@ -678,7 +680,7 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 	if value.Point.Defined() {
 		p.endpoint.AssignEndpoint(value.Point)
 	}
-	p.applyHelloMiscTags(&value.Properties)
+	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
 	debugPeerf("peer %s <- Hello", p.endpoint.String())
 	answer := p.PrepareHelloAnswer()
 	if raw, err := p.combiner.Pack("client.HelloAnswer", &answer); err == nil {
@@ -981,6 +983,12 @@ func (p *PeerConnection) GetInfo() PeerInfo {
 		Endpoint:             p.endpoint,
 		SourceFlag:           0,
 	}
+	info.UserHash = p.remoteHash
+	info.NickName = p.remotePeerInfo.NickName
+	info.Connected = p != nil && p.socket != nil && !p.IsDisconnecting()
+	if p.session != nil {
+		info.TotalUploaded, info.TotalDownloaded = p.session.Credits().TotalsForPeer(p.remoteHash)
+	}
 	if p.peerInfo != nil {
 		info.FailCount = p.peerInfo.FailCount
 		info.SourceFlag = p.peerInfo.SourceFlag
@@ -1258,19 +1266,71 @@ func (p *PeerConnection) asyncWrite(block data.PieceBlock, buffer []byte, transf
 	p.session.SubmitDiskTask(NewAsyncWrite(block, buffer, transfer))
 }
 
-func (p *PeerConnection) applyHelloMiscTags(props *protocol.TagList) {
-	if props == nil {
+const (
+	helloTagNickName = 0x01
+	helloTagVersion  = 0x11
+	helloTagModName  = 0x55
+	helloTagModVer   = 0xFB
+	helloTagMisc1    = 0xFA
+	helloTagMisc2    = 0xFE
+)
+
+func helloStringFromTag(t protocol.SimpleTag) string {
+	switch t.Type {
+	case protocol.TagTypeString:
+		return t.String
+	default:
+		if t.Type >= protocol.TagTypeStr1 && t.Type <= protocol.TagTypeStr1+15 {
+			return t.String
+		}
+	}
+	return ""
+}
+
+func decodeHelloModComposite(v uint32) string {
+	major := int((v >> 17) & 0x7f)
+	// 低 17 位内 minor（10..16）与 build（7..13）在编码上重叠，需先去掉 minor 再取 build。
+	r := v & 0x1ffff
+	minor := int((r >> 10) & 0x7f)
+	build := int(((r - (uint32(minor) << 10)) >> 7) & 0x7f)
+	if major == 0 && minor == 0 && build == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d", major, minor, build)
+}
+
+// parseHelloTagList 从 Hello/HelloAnswer 的 Properties 解析昵称、客户端标识与 Misc 选项（与 eMule 标签约定一致）。
+func parseHelloTagList(dst *RemotePeerInfo, props *protocol.TagList) {
+	if dst == nil || props == nil {
 		return
 	}
 	for _, t := range *props {
-		if t.Type != protocol.TagTypeUint32 {
-			continue
-		}
 		switch t.ID {
-		case 0xFA:
-			p.remotePeerInfo.Misc1.Assign(int(t.UInt32))
-		case 0xFE:
-			p.remotePeerInfo.Misc2.Assign(int(t.UInt32))
+		case helloTagNickName:
+			if s := helloStringFromTag(t); s != "" {
+				dst.NickName = s
+			}
+		case helloTagModName:
+			if s := helloStringFromTag(t); s != "" {
+				dst.ModName = s
+			}
+		case helloTagVersion:
+			if t.Type == protocol.TagTypeUint32 {
+				dst.Version = int(t.UInt32)
+			}
+		case helloTagModVer:
+			if t.Type == protocol.TagTypeUint32 {
+				dst.ModNumber = int(t.UInt32)
+				dst.ModVersion = decodeHelloModComposite(t.UInt32)
+			}
+		case helloTagMisc1:
+			if t.Type == protocol.TagTypeUint32 {
+				dst.Misc1.Assign(int(t.UInt32))
+			}
+		case helloTagMisc2:
+			if t.Type == protocol.TagTypeUint32 {
+				dst.Misc2.Assign(int(t.UInt32))
+			}
 		}
 	}
 }

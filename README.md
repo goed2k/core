@@ -37,6 +37,7 @@
 
 ## 相关文档
 
+- [库 API 使用指南（中文）：嵌入调用、Client/Session、快照与订阅](docs/library-api-CN.md)
 - [本地共享库与周边能力：分阶段实现说明（中文）](docs/library-implementation-phases-CN.md)
 - [Kademlia v6 协议说明（中文）](docs/kadv6-protocol-CN.md)
 - [客户端来源交换（Source Exchange）实现说明（中文）](docs/source-exchange-CN.md)

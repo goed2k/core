@@ -68,6 +68,22 @@ func (m *PeerCreditManager) AddDownloaded(hash protocol.Hash, bytes int64) {
 	}
 }
 
+// TotalsForPeer 返回与对端用户 Hash 关联的累计上传/下载字节（无记录时为 0）。
+func (m *PeerCreditManager) TotalsForPeer(hash protocol.Hash) (uploaded, downloaded uint64) {
+	if m == nil {
+		return 0, 0
+	}
+	key := m.key(hash)
+	if key == "" {
+		return 0, 0
+	}
+	c, ok := m.credits[key]
+	if !ok || c == nil {
+		return 0, 0
+	}
+	return c.Uploaded, c.Downloaded
+}
+
 func (m *PeerCreditManager) ScoreRatio(hash protocol.Hash) float64 {
 	credit := m.credit(hash)
 	if credit == nil || credit.Downloaded < 1000000 {
