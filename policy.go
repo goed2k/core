@@ -10,7 +10,7 @@ import (
 const (
 	MaxPeerListSize         = 100
 	MinReconnectTimeout     = 10
-	SourceExchangePeerLimit = 50
+	SourceExchangePeerLimit = 80
 )
 
 type Policy struct {
