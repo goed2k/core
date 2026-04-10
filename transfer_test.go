@@ -132,8 +132,13 @@ func TestTransferRequestsSourcesWhenNoActivePeersRemainUsesEmuleServerReask(t *t
 	if d := transfer.nextSourcesRequest - now; d < serverReaskTCPMS-Seconds(2) || d > serverReaskTCPMS+Seconds(2) {
 		t.Fatalf("expected next server reask ~%dms (SERVERREASKTIME), got %dms", serverReaskTCPMS, d)
 	}
-	if transfer.nextDHTRequest-now > Seconds(10) {
-		t.Fatalf("expected next DHT retry within 10s, got %dms", transfer.nextDHTRequest-now)
+	// DHT：若本轮已 Kad 要源成功，下次为 dhtSourcesReaskStarvedMS；若仅被提前到 now 且未触发发送，则约为 0
+	d := transfer.nextDHTRequest - now
+	if d < 0 {
+		t.Fatalf("expected non-negative next DHT delay, got %dms", d)
+	}
+	if d > Seconds(2) && (d < dhtSourcesReaskStarvedMS-Seconds(2) || d > dhtSourcesReaskStarvedMS+Seconds(2)) {
+		t.Fatalf("expected next DHT retry ~0 or ~%dms (starved), got %dms", dhtSourcesReaskStarvedMS, d)
 	}
 }
 
@@ -320,7 +325,7 @@ func TestRequestSourcesNowBacksOffWhenDHTUnavailable(t *testing.T) {
 	if transfer.nextSourcesRequest <= now {
 		t.Fatalf("expected next server source request to be scheduled, got %d", transfer.nextSourcesRequest)
 	}
-	if transfer.nextDHTRequest-now < Seconds(30) {
+	if transfer.nextDHTRequest-now < dhtSourcesReaskFailFastMS {
 		t.Fatalf("expected dht retry to back off after failure, got %dms", transfer.nextDHTRequest-now)
 	}
 }

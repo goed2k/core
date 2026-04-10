@@ -22,6 +22,17 @@ const (
 	serverReaskTCPMS     = 800_000  // SERVERREASKTIME（约 13.3 分钟），无活跃连接与候选时略缩短
 )
 
+// DHT（Kad）要源：eMule 中对同一文件重复发起 Kad 源搜索的间隔通常为 KADEMLIAREASKTIME
+//（约 1 小时量级，见 eMule Kademlia 侧实现）；本实现为更快发现源采用更短默认间隔。
+// 下列毫秒值与 nextDHTSourcesInterval 各分支一致。
+const (
+	dhtSourcesReaskStarvedMS  = 30_000  // 成功发出且无任何连接/候选
+	dhtSourcesReaskSparseMS   = 60_000  // 成功发出且连接或候选稀疏（≤1）
+	dhtSourcesReaskNormalMS   = 120_000 // 成功发出时的默认间隔
+	dhtSourcesReaskFailFastMS = 30_000  // 未能发起 Kad 搜索：无连接且无候选
+	dhtSourcesReaskFailSlowMS = 60_000  // 未能发起：否则
+)
+
 type Transfer struct {
 	hash               protocol.Hash
 	aichRoot           protocol.AICHHash
@@ -658,20 +669,20 @@ func (t *Transfer) nextServerSourcesInterval(activeConnections, connectCandidate
 
 func (t *Transfer) nextDHTSourcesInterval(activeConnections, connectCandidates int, sent bool) int64 {
 	if sent {
-		nextInterval := Minutes(2)
 		if activeConnections == 0 && connectCandidates == 0 {
-			nextInterval = Seconds(30)
-		} else if activeConnections <= 1 || connectCandidates <= 1 {
-			nextInterval = Minutes(1)
+			return dhtSourcesReaskStarvedMS
 		}
-		return nextInterval
+		if activeConnections <= 1 || connectCandidates <= 1 {
+			return dhtSourcesReaskSparseMS
+		}
+		return dhtSourcesReaskNormalMS
 	}
 
-	// DHT is unavailable or could not start; retry, but never every tick.
+	// Kad 不可用或搜索未能启动：较快重试，但仍避免与 SecondTick 同频
 	if activeConnections == 0 && connectCandidates == 0 {
-		return Seconds(30)
+		return dhtSourcesReaskFailFastMS
 	}
-	return Minutes(1)
+	return dhtSourcesReaskFailSlowMS
 }
 
 func (t *Transfer) QueuePieceHash(pieceIndex int) bool {
@@ -766,7 +777,8 @@ func (t *Transfer) SecondTick(accumulator *Statistics, tickIntervalMS int64) {
 		if activeConnections <= 1 && connectCandidates <= 1 && t.nextSourcesRequest > now+fileReaskServerTCPMS {
 			t.nextSourcesRequest = now
 		}
-		if activeConnections <= 1 && connectCandidates <= 1 && t.nextDHTRequest > now+Seconds(10) {
+		// 阈值须 ≥ 成功入队后的最大 DHT 间隔（dhtSourcesReaskNormalMS），否则缺源时会每秒重发 Kad 搜索。
+		if activeConnections <= 1 && connectCandidates <= 1 && t.nextDHTRequest > now+dhtSourcesReaskNormalMS {
 			t.nextDHTRequest = now
 		}
 		if t.nextSourcesRequest <= now {
