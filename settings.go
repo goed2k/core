@@ -14,7 +14,9 @@ type Settings struct {
 	ClientName              string
 	ListenPort              int
 	UDPPort                 int
+	UDPPortV6               int
 	EnableDHT               bool
+	EnableDHTv6             bool
 	EnableUPnP              bool
 	Version                 int
 	ModMajor                int
@@ -34,6 +36,7 @@ type Settings struct {
 	CompressionVersion      int
 	ServerSearchTimeout     int
 	DHTSearchTimeout        int
+	DHTv6SearchTimeout      int
 	ReconnectToServer       bool
 	ServerPingTimeout       int64
 }
@@ -49,7 +52,9 @@ func NewSettings() Settings {
 		ClientName:              "jed2k",
 		ListenPort:              4661,
 		UDPPort:                 4662,
+		UDPPortV6:               4672,
 		EnableDHT:               false,
+		EnableDHTv6:             false,
 		EnableUPnP:              false,
 		Version:                 0x3c,
 		ModMajor:                0,
@@ -69,6 +74,7 @@ func NewSettings() Settings {
 		CompressionVersion:      0,
 		ServerSearchTimeout:     15,
 		DHTSearchTimeout:        8,
+		DHTv6SearchTimeout:      8,
 		ReconnectToServer:       false,
 		ServerPingTimeout:       0,
 	}

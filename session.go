@@ -35,6 +35,7 @@ type Session struct {
 	listener                 *net.TCPListener
 	incomingConns            chan net.Conn
 	dhtTracker               *DHTTracker
+	dhtv6Tracker             *KADV6Tracker
 	upnp                     *upnpManager
 	uploadQueue              *UploadQueue
 	credits                  *PeerCreditManager
@@ -869,6 +870,25 @@ func (s *Session) diskTaskCount() int {
 	s.diskMu.Lock()
 	defer s.diskMu.Unlock()
 	return len(s.diskTasks)
+}
+
+func (s *Session) SyncDHTv6ListenPort() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dhtv6Tracker == nil {
+		return
+	}
+	if port := s.dhtv6Tracker.ListenPort(); port > 0 {
+		s.settings.UDPPortV6 = port
+	}
+}
+
+func (s *Session) SetDHTv6Tracker(tracker *KADV6Tracker) {
+	s.dhtv6Tracker = tracker
+}
+
+func (s *Session) GetDHTv6Tracker() *KADV6Tracker {
+	return s.dhtv6Tracker
 }
 
 func (s *Session) SetDHTTracker(tracker *DHTTracker) {

@@ -12,7 +12,7 @@ import (
 	"github.com/goed2k/core/protocol"
 )
 
-const clientStateVersion = 3
+const clientStateVersion = 4
 
 type ClientStateStore interface {
 	Load() (*ClientState, error)
@@ -26,6 +26,7 @@ type ClientState struct {
 	Credits       []ClientCreditState   `json:"credits,omitempty"`
 	FriendSlots   []protocol.Hash       `json:"friend_slots,omitempty"`
 	DHT           *ClientDHTState       `json:"dht,omitempty"`
+	DHTv6         *ClientDHTv6State     `json:"dhtv6,omitempty"`
 	SharedDirs    []string              `json:"shared_dirs,omitempty"`
 	SharedFiles   []ClientSharedFileState `json:"shared_files,omitempty"`
 }
@@ -207,6 +208,9 @@ func (c *Client) snapshotState() (*ClientState, error) {
 	if tracker := c.GetDHTTracker(); tracker != nil {
 		state.DHT = tracker.SnapshotState()
 	}
+	if tracker := c.GetDHTv6Tracker(); tracker != nil {
+		state.DHTv6 = tracker.SnapshotState()
+	}
 	state.SharedDirs = c.session.ListSharedDirs()
 	for _, sf := range c.session.SharedFiles() {
 		if sf == nil {
@@ -248,7 +252,7 @@ func (c *Client) applyState(state *ClientState) error {
 	if state == nil {
 		return nil
 	}
-	if state.Version != 0 && state.Version != 1 && state.Version != 2 && state.Version != clientStateVersion {
+	if state.Version != 0 && state.Version != 1 && state.Version != 2 && state.Version != 3 && state.Version != clientStateVersion {
 		return errors.New("unsupported state version")
 	}
 	c.serverAddr = state.ServerAddress
@@ -256,6 +260,11 @@ func (c *Client) applyState(state *ClientState) error {
 	c.session.applyFriendSlotSnapshot(state.FriendSlots)
 	if state.DHT != nil {
 		if err := c.EnableDHT().ApplyState(state.DHT); err != nil {
+			return err
+		}
+	}
+	if state.DHTv6 != nil {
+		if err := c.EnableDHTv6().ApplyState(state.DHTv6); err != nil {
 			return err
 		}
 	}

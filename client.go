@@ -17,6 +17,7 @@ import (
 	"github.com/goed2k/core/internal/logx"
 	"github.com/goed2k/core/protocol"
 	kadproto "github.com/goed2k/core/protocol/kad"
+	kadv6proto "github.com/goed2k/core/protocol/kadv6"
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
@@ -69,6 +70,122 @@ func NewClient(settings Settings) *Client {
 
 func (c *Client) Session() *Session {
 	return c.session
+}
+
+func (c *Client) SetDHTv6Tracker(tracker *KADV6Tracker) {
+	c.session.SetDHTv6Tracker(tracker)
+}
+
+func (c *Client) GetDHTv6Tracker() *KADV6Tracker {
+	return c.session.GetDHTv6Tracker()
+}
+
+func (c *Client) EnableDHTv6() *KADV6Tracker {
+	if tracker := c.GetDHTv6Tracker(); tracker != nil {
+		return tracker
+	}
+	timeout := time.Duration(c.session.settings.DHTv6SearchTimeout) * time.Second
+	tracker := NewKADV6Tracker(c.session.settings.UDPPortV6, timeout)
+	c.SetDHTv6Tracker(tracker)
+	return tracker
+}
+
+func (c *Client) LoadDHTv6NodesDat(path ...string) error {
+	if len(path) == 0 {
+		return errors.New("nodes6.dat path is empty")
+	}
+	var errs []error
+	loaded := false
+	for _, source := range path {
+		for _, part := range strings.Split(source, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			nodes, err := c.loadDHTv6NodesDat(part)
+			if err != nil {
+				logx.Debug("load nodes6.dat failed", "source", part, "err", err)
+				errs = append(errs, fmt.Errorf("%s: %w", part, err))
+				continue
+			}
+			if err := c.EnableDHTv6().ApplyNodesDat(nodes); err != nil {
+				logx.Debug("apply nodes6.dat failed", "source", part, "err", err)
+				errs = append(errs, fmt.Errorf("%s: %w", part, err))
+				continue
+			}
+			logx.Debug("nodes6.dat loaded", "source", part, "entries", len(nodes.Contacts))
+			loaded = true
+		}
+	}
+	if loaded {
+		return nil
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return errors.New("nodes6.dat path is empty")
+}
+
+func (c *Client) AddDHTv6BootstrapNodes(nodes ...string) error {
+	tracker := c.EnableDHTv6()
+	for _, item := range nodes {
+		for _, part := range strings.Split(item, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			addr, err := resolveKADV6BootstrapAddr(part)
+			if err != nil {
+				return err
+			}
+			tracker.AddNode(addr)
+		}
+	}
+	return nil
+}
+
+func (c *Client) PublishDHTv6Source(hash protocol.Hash, tcpAddr *net.TCPAddr, size int64) bool {
+	return c.EnableDHTv6().PublishSource(hash, tcpAddr, size)
+}
+
+func (c *Client) PublishDHTv6Keyword(keywordHash protocol.Hash, entries ...kadv6proto.SearchEntry) bool {
+	return c.EnableDHTv6().PublishKeyword(keywordHash, entries...)
+}
+
+func (c *Client) PublishDHTv6Notes(fileHash protocol.Hash, entries ...kadv6proto.SearchEntry) bool {
+	return c.EnableDHTv6().PublishNotes(fileHash, entries...)
+}
+
+func (c *Client) SearchDHTv6Sources(hash protocol.Hash, size int64, cb func([]kadv6proto.SearchEntry)) bool {
+	return c.EnableDHTv6().SearchSources(hash, size, cb)
+}
+
+func (c *Client) SearchDHTv6Keywords(keywordHash protocol.Hash, cb func([]kadv6proto.SearchEntry)) bool {
+	return c.EnableDHTv6().SearchKeywords(keywordHash, cb)
+}
+
+func (c *Client) SearchDHTv6Notes(fileHash protocol.Hash, cb func([]kadv6proto.SearchEntry)) bool {
+	return c.EnableDHTv6().SearchNotes(fileHash, cb)
+}
+
+func (c *Client) SetDHTv6StoragePoint(address string) error {
+	if strings.TrimSpace(address) == "" {
+		c.EnableDHTv6().SetStoragePoint(nil)
+		return nil
+	}
+	addr, err := net.ResolveUDPAddr("udp6", address)
+	if err != nil {
+		return err
+	}
+	c.EnableDHTv6().SetStoragePoint(addr)
+	return nil
+}
+
+func (c *Client) DHTv6Status() KADV6Status {
+	if tracker := c.GetDHTv6Tracker(); tracker != nil {
+		return tracker.Status()
+	}
+	return KADV6Status{}
 }
 
 func (c *Client) SetDHTTracker(tracker *DHTTracker) {
@@ -197,6 +314,9 @@ func (c *Client) Start() error {
 		if c.session.settings.EnableDHT && c.GetDHTTracker() == nil {
 			c.EnableDHT()
 		}
+		if c.session.settings.EnableDHTv6 && c.GetDHTv6Tracker() == nil {
+			c.EnableDHTv6()
+		}
 		err = c.session.Listen()
 		if err != nil {
 			return
@@ -212,6 +332,19 @@ func (c *Client) Start() error {
 				return
 			}
 			c.session.SyncDHTListenPort()
+		}
+		if tracker := c.GetDHTv6Tracker(); tracker != nil {
+			if startErr := tracker.Start(); startErr != nil {
+				err = startErr
+				if c.GetDHTTracker() != nil {
+					c.GetDHTTracker().Close()
+				}
+				c.session.CloseListener()
+				return
+			}
+			c.session.SyncDHTv6ListenPort()
+		}
+		if c.GetDHTTracker() != nil || c.GetDHTv6Tracker() != nil {
 			if c.session.settings.EnableUPnP {
 				c.session.RefreshUPnPMapping()
 			}
@@ -263,6 +396,9 @@ func (c *Client) Stop() error {
 			if tracker := c.GetDHTTracker(); tracker != nil {
 				tracker.Close()
 			}
+			if tracker := c.GetDHTv6Tracker(); tracker != nil {
+				tracker.Close()
+			}
 			c.session.DisconnectFrom()
 			c.session.CloseListener()
 			select {
@@ -272,6 +408,9 @@ func (c *Client) Stop() error {
 		} else {
 			c.session.closeServerStatUDPListener()
 			if tracker := c.GetDHTTracker(); tracker != nil {
+				tracker.Close()
+			}
+			if tracker := c.GetDHTv6Tracker(); tracker != nil {
 				tracker.Close()
 			}
 			c.session.DisconnectFrom()
@@ -451,6 +590,27 @@ func (c *Client) loadServerMet(source string) (*serverproto.ServerMet, error) {
 	}
 
 	return serverproto.LoadServerMet(source)
+}
+
+func (c *Client) loadDHTv6NodesDat(source string) (*kadv6proto.NodesDat, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil, errors.New("nodes6.dat source is empty")
+	}
+	parsedURL, err := url.Parse(source)
+	if err == nil && parsedURL.Scheme != "" {
+		switch parsedURL.Scheme {
+		case "file":
+			return kadv6proto.LoadNodesDat(parsedURL.Path)
+		case "http", "https":
+			data, err := fetchRemoteResource(source)
+			if err != nil {
+				return nil, err
+			}
+			return kadv6proto.ParseNodesDat(data)
+		}
+	}
+	return kadv6proto.LoadNodesDat(source)
 }
 
 func (c *Client) loadDHTNodesDat(source string) (*kadproto.NodesDat, error) {

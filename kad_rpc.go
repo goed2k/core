@@ -14,7 +14,12 @@ type kadRPCTransaction struct {
 	sentTime    time.Time
 	multi       bool
 	shortTimed  bool
-	observer    *kadObserver
+	observer    any
+}
+
+type kadRPCTimeoutObserver interface {
+	shortTimeout()
+	timeout()
 }
 
 type kadRPCManager struct {
@@ -60,6 +65,24 @@ func (m *kadRPCManager) Incoming(addr *net.UDPAddr, opcode byte, target *protoco
 		return tx
 	}
 	return nil
+}
+
+func rpcObserverShortTimeout(observer any) {
+	switch o := observer.(type) {
+	case *kadObserver:
+		o.shortTimeout()
+	case *kadv6Observer:
+		o.shortTimeout()
+	}
+}
+
+func rpcObserverTimeout(observer any) {
+	switch o := observer.(type) {
+	case *kadObserver:
+		o.timeout()
+	case *kadv6Observer:
+		o.timeout()
+	}
 }
 
 func (m *kadRPCManager) Tick(now time.Time) (shortTimed []*kadRPCTransaction, expired []*kadRPCTransaction) {

@@ -37,6 +37,7 @@ type tuiModel struct {
 	cfg           runConfig
 	targetPaths   []string
 	includeDHT    bool
+	includeDHTv6 bool
 	deadline      time.Time
 	width         int
 	height        int
@@ -130,6 +131,7 @@ func newTUIModel(app *appContext, cfg runConfig, events <-chan ed2k.ClientStatus
 		cfg:          cfg,
 		targetPaths:  append([]string(nil), app.targetPaths...),
 		includeDHT:   app.includeDHT,
+		includeDHTv6: app.includeDHTv6,
 		deadline:     app.deadline,
 		status:       app.client.Status(),
 		search:       app.client.SearchSnapshot(),
@@ -828,6 +830,10 @@ func (m tuiModel) renderHeader() string {
 		dht := m.client.DHTStatus()
 		status += fmt.Sprintf("  kad live=%d known=%d run=%d", dht.LiveNodes, dht.KnownNodes, dht.RunningTraversals)
 	}
+	if m.includeDHTv6 {
+		dhtv6 := m.client.DHTv6Status()
+		status += fmt.Sprintf("  kadv6 live=%d known=%d run=%d", dhtv6.LiveNodes, dhtv6.KnownNodes, dhtv6.RunningTraversals)
+	}
 	return headerStyle.Render(status)
 }
 
@@ -854,9 +860,11 @@ func (m tuiModel) renderEmptyState(width int) string {
 		fmt.Sprintf("output=%s", emptyFallback(m.cfg.outDir, ".")),
 		fmt.Sprintf("servers=%s", emptyFallback(m.cfg.serverAddr, "-")),
 		fmt.Sprintf("server.met=%s", emptyFallback(m.cfg.serverMetPath, "-")),
-		fmt.Sprintf("kad=%t  upnp=%t  nodes.dat=%s", m.cfg.enableKAD, m.cfg.enableUPnP, emptyFallback(m.cfg.kadNodesDat, "-")),
+		fmt.Sprintf("kad=%t  kadv6=%t  upnp=%t  nodes.dat=%s", m.cfg.enableKAD, m.cfg.enableKADV6, m.cfg.enableUPnP, emptyFallback(m.cfg.kadNodesDat, "-")),
 		fmt.Sprintf("kad bootstrap=%s", emptyFallback(m.cfg.kadNodes, "-")),
-		fmt.Sprintf("listen=%d  udp=%d  peer-timeout=%ds", m.runtimeListenPort(), m.runtimeUDPPort(), m.cfg.peerTimeout),
+		fmt.Sprintf("kadv6 nodes6.dat=%s", emptyFallback(m.cfg.kadv6NodesDat, "-")),
+		fmt.Sprintf("kadv6 bootstrap=%s", emptyFallback(m.cfg.kadv6Nodes, "-")),
+		fmt.Sprintf("listen=%d  udp=%d  udp6=%d  peer-timeout=%ds", m.runtimeListenPort(), m.runtimeUDPPort(), m.runtimeUDPPortV6(), m.cfg.peerTimeout),
 	}
 	if !m.deadline.IsZero() {
 		lines = append(lines, fmt.Sprintf("timeout=%s", time.Until(m.deadline).Round(time.Second)))
@@ -1005,6 +1013,15 @@ func (m tuiModel) runtimeListenPort() int {
 		return port
 	}
 	return m.cfg.listenPort
+}
+
+func (m tuiModel) runtimeUDPPortV6() int {
+	if tracker := m.client.GetDHTv6Tracker(); tracker != nil {
+		if port := tracker.ListenPort(); port > 0 {
+			return port
+		}
+	}
+	return m.cfg.udpPortV6
 }
 
 func (m tuiModel) runtimeUDPPort() int {

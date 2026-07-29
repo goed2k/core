@@ -156,14 +156,14 @@ func (n *kadNodeImpl) tick() {
 		if tx == nil || tx.observer == nil {
 			continue
 		}
-		tx.observer.shortTimeout()
+		rpcObserverShortTimeout(tx.observer)
 	}
 	for _, tx := range expired {
 		if tx == nil {
 			continue
 		}
 		if tx.observer != nil {
-			tx.observer.timeout()
+			rpcObserverTimeout(tx.observer)
 			continue
 		}
 		node := n.tracker.nodes[tx.endpointKey]
@@ -249,13 +249,17 @@ func (n *kadNodeImpl) processFindRes(addr *net.UDPAddr, res kadproto.Res) {
 	target := res.Target.Hash
 	tx := n.tracker.rpc.Incoming(addr, kadproto.ResOp, &target)
 	n.tracker.handleFindResponse(addr, res)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
+		return
+	}
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
 		return
 	}
 	for _, entry := range res.Results {
-		tx.observer.traversal.traverse(udpAddrFromKad(entry.Endpoint), entry.ID, entry.Endpoint.TCPPort, entry.Version)
+		observer.traversal.traverse(udpAddrFromKad(entry.Endpoint), entry.ID, entry.Endpoint.TCPPort, entry.Version)
 	}
-	tx.observer.done()
+	observer.done()
 }
 
 func (n *kadNodeImpl) processBootstrapReq(addr *net.UDPAddr) {
@@ -271,13 +275,17 @@ func (n *kadNodeImpl) processBootstrapRes(addr *net.UDPAddr, res kadproto.Bootst
 	}
 	tx := n.tracker.rpc.Incoming(addr, kadproto.BootstrapResOp, nil)
 	n.tracker.handleBootstrapResponse(addr, res)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
+		return
+	}
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
 		return
 	}
 	for _, contact := range res.Contacts {
-		tx.observer.traversal.traverse(udpAddrFromKad(contact.Endpoint), contact.ID, contact.Endpoint.TCPPort, contact.Version)
+		observer.traversal.traverse(udpAddrFromKad(contact.Endpoint), contact.ID, contact.Endpoint.TCPPort, contact.Version)
 	}
-	tx.observer.done()
+	observer.done()
 }
 
 func (n *kadNodeImpl) processPublishKeysReq(addr *net.UDPAddr, req kadproto.PublishKeysReq) {
@@ -340,11 +348,15 @@ func (n *kadNodeImpl) processFirewalledRes(addr *net.UDPAddr, res kadproto.Firew
 	}
 	tx := n.tracker.rpc.Incoming(addr, kadproto.FirewalledResOp, nil)
 	n.tracker.handleFirewalledResponse(addr, res)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
 		return
 	}
-	tx.observer.externalIP = res.IP
-	tx.observer.done()
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
+		return
+	}
+	observer.externalIP = res.IP
+	observer.done()
 }
 
 func (n *kadNodeImpl) processSearchKeysReq(addr *net.UDPAddr, req kadproto.SearchKeysReq) {
@@ -367,11 +379,15 @@ func (n *kadNodeImpl) processSearchRes(addr *net.UDPAddr, res kadproto.SearchRes
 	}
 	target := res.Target.Hash
 	tx := n.tracker.rpc.Incoming(addr, kadproto.SearchResOp, &target)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
 		return
 	}
-	tx.observer.entries = append(tx.observer.entries, res.Results...)
-	tx.observer.processedResponses++
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
+		return
+	}
+	observer.entries = append(observer.entries, res.Results...)
+	observer.processedResponses++
 }
 
 func (n *kadNodeImpl) processPong(addr *net.UDPAddr, pong kadproto.Pong) {
