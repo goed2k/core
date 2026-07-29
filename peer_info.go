@@ -12,6 +12,7 @@ const (
 	PeerDHT            byte = 0x4
 	PeerResume         byte = 0x8
 	PeerSourceExchange byte = 0x10
+	PeerKADV6          byte = 0x20
 )
 
 type PeerInfo struct {
@@ -44,6 +45,9 @@ func PeerSourceLabels(sourceFlag int) []string {
 	}
 	if (sourceFlag & int(PeerDHT)) != 0 {
 		labels = append(labels, "kad")
+	}
+	if (sourceFlag & int(PeerKADV6)) != 0 {
+		labels = append(labels, "kadv6")
 	}
 	if (sourceFlag & int(PeerResume)) != 0 {
 		labels = append(labels, "resume")

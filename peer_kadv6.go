@@ -11,6 +11,9 @@ func PeerFromKADV6SearchEntry(se kadv6.SearchEntry, sourceFlag int) (Peer, bool)
 	if !ok {
 		return Peer{}, false
 	}
+	if sourceFlag == 0 {
+		sourceFlag = int(PeerKADV6)
+	}
 	return NewPeerFromTCPAddr(tcp, true, sourceFlag), true
 }
 
@@ -19,7 +22,7 @@ func (t *Transfer) AddPeerFromKADV6Search(entry kadv6.SearchEntry) (bool, error)
 	if t == nil {
 		return false, NewError(IllegalArgument)
 	}
-	p, ok := PeerFromKADV6SearchEntry(entry, int(PeerDHT))
+	p, ok := PeerFromKADV6SearchEntry(entry, int(PeerKADV6))
 	if !ok {
 		return false, nil
 	}
