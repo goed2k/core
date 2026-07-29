@@ -193,6 +193,12 @@ func (n *kadNodeImpl) tick() {
 		n.tracker.lastFirewalledCheck = now
 		n.firewalled()
 	}
+	if n.tracker.firewalled && live >= 1 {
+		if n.tracker.lastFindBuddy.IsZero() || now.Sub(n.tracker.lastFindBuddy) >= time.Minute {
+			n.tracker.lastFindBuddy = now
+			n.sendFindBuddyReq()
+		}
+	}
 	if live == 0 && len(n.tracker.nodes) > 0 && n.tracker.table.NeedBootstrap(now) {
 		n.tracker.lastBootstrap = now
 		seeds := n.tracker.knownNodesLocked(false)
@@ -443,4 +449,74 @@ func (n *kadNodeImpl) processAddresses(addresses []uint32) {
 		}
 	}
 	n.tracker.firewalled = matchCount != 2
+	if n.tracker.firewalled {
+		n.tryCallbackBootstrap()
+	}
+}
+
+func (n *kadNodeImpl) tryCallbackBootstrap() {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	now := time.Now()
+	if !n.tracker.lastCallbackTry.IsZero() && now.Sub(n.tracker.lastCallbackTry) < time.Minute {
+		return
+	}
+	n.tracker.lastCallbackTry = now
+	nodes := n.tracker.closestNodesLocked(n.tracker.selfID, 3, true)
+	for _, node := range nodes {
+		if node != nil && node.Addr != nil {
+			_, _ = n.tracker.writePacket(node.Addr, kadproto.CallbackReq{})
+		}
+	}
+}
+
+func (n *kadNodeImpl) sendFindBuddyReq() {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	nodes := n.tracker.closestNodesLocked(n.tracker.selfID, 3, true)
+	for _, node := range nodes {
+		if node != nil && node.Addr != nil {
+			_, _ = n.tracker.writePacket(node.Addr, kadproto.FindBuddyReq{})
+		}
+	}
+}
+
+func (n *kadNodeImpl) processCallbackReq(addr *net.UDPAddr) {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	n.tracker.mu.Lock()
+	if node := n.tracker.nodes[addr.String()]; node != nil {
+		n.tracker.confirmNodeLocked(node)
+	}
+	n.tracker.mu.Unlock()
+	_, _ = n.tracker.writePacket(addr, kadproto.Pong{UDPPort: uint16(n.tracker.ListenPort())})
+}
+
+func (n *kadNodeImpl) processFindBuddyReq(addr *net.UDPAddr) {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	n.tracker.mu.Lock()
+	firewalled := n.tracker.firewalled
+	n.tracker.mu.Unlock()
+	if firewalled {
+		return
+	}
+	_, _ = n.tracker.writePacket(addr, kadproto.FindBuddyRes{})
+}
+
+func (n *kadNodeImpl) processFindBuddyRes(addr *net.UDPAddr) {
+	if n == nil || n.tracker == nil || addr == nil {
+		return
+	}
+	n.tracker.mu.Lock()
+	defer n.tracker.mu.Unlock()
+	node := n.tracker.nodes[addr.String()]
+	if node != nil && node.KnownID() {
+		n.tracker.buddyHash = node.ID.Hash
+		n.tracker.buddyAddr = addr
+	}
 }

@@ -3,6 +3,7 @@ package goed2k
 import (
 	"errors"
 	"net"
+	"strconv"
 
 	"github.com/goed2k/core/protocol"
 )
@@ -15,6 +16,8 @@ type Peer struct {
 	SourceFlag     int
 	Connection     any
 	Endpoint       protocol.Endpoint
+	// ServerClientID 非零表示服务器来源的低 ID 用户 ID（Endpoint 的 IP 字段实为 client ID）。
+	ServerClientID int32
 	// DialAddr 可选；非 nil 时优先用于 TCP 拨号（如 KADV6 纯 IPv6 来源），与 Endpoint 可并存（IPv4 时常同步）。
 	DialAddr *net.TCPAddr
 }
@@ -51,6 +54,9 @@ func cloneTCPAddr(a *net.TCPAddr) *net.TCPAddr {
 }
 
 func peerSortKey(p Peer) string {
+	if p.ServerClientID != 0 {
+		return "s:" + strconv.FormatInt(int64(p.ServerClientID), 10)
+	}
 	if p.DialAddr != nil {
 		return "d:" + p.DialAddr.String()
 	}
@@ -75,8 +81,11 @@ func (p Peer) Equal(other Peer) bool {
 	return p.Compare(other) == 0
 }
 
-// HasDialableAddress 是否具备可尝试 TCP 的地址（IPv4 Endpoint 或 DialAddr）。
+// HasDialableAddress 是否具备可尝试 TCP 的地址（IPv4 Endpoint、DialAddr，或可通过服务器回调的低 ID）。
 func (p Peer) HasDialableAddress() bool {
+	if p.ServerClientID != 0 {
+		return true
+	}
 	if p.Endpoint.Defined() {
 		return true
 	}

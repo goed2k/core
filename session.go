@@ -20,6 +20,7 @@ type Session struct {
 	transfers                map[protocol.Hash]*Transfer
 	connections              []*PeerConnection
 	callbacks                map[int32]protocol.Hash
+	callbackCooldown         map[int32]int64
 	settings                 Settings
 	lastTick                 int64
 	accumulator              Statistics
@@ -84,6 +85,7 @@ func NewSession(st Settings) *Session {
 		transfers:              make(map[protocol.Hash]*Transfer),
 		connections:            make([]*PeerConnection, 0),
 		callbacks:              make(map[int32]protocol.Hash),
+		callbackCooldown:       make(map[int32]int64),
 		settings:               st,
 		lastTick:               CurrentTime(),
 		accumulator:            NewStatistics(),

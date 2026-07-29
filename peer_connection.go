@@ -682,6 +682,9 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 	}
 	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
 	debugPeerf("peer %s <- Hello", p.endpoint.String())
+	if value.Point.Defined() && IsLowID(value.Point.IP()) {
+		p.session.tryAttachCallbackPeer(p, value.Point.IP())
+	}
 	answer := p.PrepareHelloAnswer()
 	if raw, err := p.combiner.Pack("client.HelloAnswer", &answer); err == nil {
 		p.QueuePacket(raw)

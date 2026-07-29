@@ -36,6 +36,10 @@ type DHTTracker struct {
 	firewalled          bool
 	externalIPs         []uint32
 	storagePoint        *net.UDPAddr
+	buddyHash           protocol.Hash
+	buddyAddr           *net.UDPAddr
+	lastFindBuddy       time.Time
+	lastCallbackTry     time.Time
 }
 
 func NewDHTTracker(listenPort int, timeout time.Duration) *DHTTracker {
@@ -274,7 +278,13 @@ func (t *DHTTracker) readLoop() {
 			t.node.processFirewalledUDP(addr, *(message.(*kadproto.FirewalledUDP)))
 		case kadproto.SearchNotesReqOp:
 			t.node.processSearchNotesReq(addr, *(message.(*kadproto.SearchNotesReq)))
-		case kadproto.SearchNotesResOp, kadproto.HelloResAckOp, kadproto.PublishResAckOp, kadproto.CallbackReqOp, kadproto.FindBuddyReqOp, kadproto.FindBuddyResOp:
+		case kadproto.CallbackReqOp:
+			t.node.processCallbackReq(addr)
+		case kadproto.FindBuddyReqOp:
+			t.node.processFindBuddyReq(addr)
+		case kadproto.FindBuddyResOp:
+			t.node.processFindBuddyRes(addr)
+		case kadproto.SearchNotesResOp, kadproto.HelloResAckOp, kadproto.PublishResAckOp:
 			continue
 		}
 	}
