@@ -13,7 +13,7 @@ const (
 	// connectionIODeadlineNS 为单次读/写 syscall 的超时（纳秒）。
 	// 会话主循环按 tick 轮询各连接；短超时可避免无数据时阻塞整个循环。
 	connectionIODeadlineNS = int64(5 * 1000 * 1000)
-	connectionReadBufSize    = 16 * 1024
+	connectionReadBufSize  = 16 * 1024
 )
 
 type Connection struct {
