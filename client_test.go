@@ -183,6 +183,7 @@ func TestClientSaveAndLoadStateRestoresProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add link: %v", err)
 	}
+	registerTransferFileCleanup(t, handle)
 	block := data.NewPieceBlock(0, 0)
 	if _, err := handle.transfer.pm.WriteBlock(block, make([]byte, BlockSize)); err != nil {
 		t.Fatalf("seed block data: %v", err)
@@ -209,6 +210,7 @@ func TestClientSaveAndLoadStateRestoresProgress(t *testing.T) {
 	if !restoredHandle.IsValid() {
 		t.Fatal("expected restored transfer handle to be valid")
 	}
+	registerTransferFileCleanup(t, restoredHandle)
 	if restoredHandle.GetFilePath() != targetPath {
 		t.Fatalf("unexpected restored path: %s", restoredHandle.GetFilePath())
 	}

@@ -58,6 +58,7 @@ func TestLocalPeerUploadServesRequestedData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("leech add transfer: %v", err)
 	}
+	registerTransferFileCleanup(t, seedHandle, leechHandle)
 	endpoint, err := protocol.EndpointFromString("127.0.0.1", seedSettings.ListenPort)
 	if err != nil {
 		t.Fatalf("endpoint: %v", err)
