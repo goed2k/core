@@ -47,6 +47,7 @@ type Session struct {
 	uploadQueue              *UploadQueue
 	credits                  *PeerCreditManager
 	friendSlots              map[string]bool
+	downloadLimiter          *downloadRateLimiter
 	activeSearch             *searchTask
 	nextSearchID             uint32
 	lastKadPublishEndpoint   protocol.Endpoint
@@ -59,6 +60,7 @@ type Session struct {
 	serverStatUDPConn *net.UDPConn
 	serverStatUDPStop chan struct{}
 	listenPortWasDynamic bool
+	identity          *IdentityState
 }
 
 type serverMetEntryMeta struct {
@@ -103,6 +105,7 @@ func NewSession(st Settings) *Session {
 		incomingConns:          make(chan incomingConnEntry, 32),
 		credits:                NewPeerCreditManager(),
 		friendSlots:            make(map[string]bool),
+		downloadLimiter:        newDownloadRateLimiter(st.MaxDownloadRateKB),
 		sharedStore:            NewSharedStore(),
 		sharedDirs:             make([]string, 0),
 	}
@@ -124,6 +127,25 @@ func (s *Session) ConfigureSession(st Settings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.settings = st
+	if s.credits != nil {
+		s.credits.SetCreditsOnlyVerified(st.CreditsOnlyVerified)
+	}
+	if s.downloadLimiter != nil {
+		s.downloadLimiter.setRateKB(st.MaxDownloadRateKB)
+	}
+}
+
+func (s *Session) ThrottleDownload(bytes int) {
+	if s == nil || bytes <= 0 {
+		return
+	}
+	if s.settings.MaxDownloadRateKB <= 0 {
+		return
+	}
+	if s.downloadLimiter == nil {
+		s.downloadLimiter = newDownloadRateLimiter(s.settings.MaxDownloadRateKB)
+	}
+	s.downloadLimiter.wait(bytes)
 }
 
 func (s *Session) AddTransfer(hash protocol.Hash, size int64, file *os.File) (TransferHandle, error) {
@@ -972,7 +994,38 @@ func (s *Session) Credits() *PeerCreditManager {
 	if s.credits == nil {
 		s.credits = NewPeerCreditManager()
 	}
+	s.credits.SetCreditsOnlyVerified(s.settings.CreditsOnlyVerified)
 	return s.credits
+}
+
+func (s *Session) Identity() *IdentityState {
+	if s == nil {
+		return nil
+	}
+	return s.identity
+}
+
+func (s *Session) SetIdentity(id *IdentityState) {
+	if s == nil {
+		return
+	}
+	s.identity = id
+}
+
+func (s *Session) LoadIdentity(path string) error {
+	if s == nil {
+		return errors.New("session is nil")
+	}
+	id, err := LoadIdentityState(path)
+	if err != nil {
+		return err
+	}
+	if !s.settings.UserAgent.Equal(protocol.Invalid) {
+		id.LinkUserHash(s.settings.UserAgent)
+	}
+	s.identity = id
+	s.settings.IdentityKeyPath = path
+	return nil
 }
 
 func (s *Session) SetFriendSlot(hash protocol.Hash, enabled bool) {

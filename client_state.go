@@ -12,7 +12,7 @@ import (
 	"github.com/goed2k/core/protocol"
 )
 
-const clientStateVersion = 4
+const clientStateVersion = 5
 
 type ClientStateStore interface {
 	Load() (*ClientState, error)
@@ -20,9 +20,11 @@ type ClientStateStore interface {
 }
 
 type ClientState struct {
-	Version       int                   `json:"version"`
-	ServerAddress string                `json:"server_address,omitempty"`
-	Transfers     []ClientTransferState `json:"transfers"`
+	Version           int                   `json:"version"`
+	ServerAddress     string                `json:"server_address,omitempty"`
+	IdentityVersion   int                   `json:"identity_version,omitempty"`
+	IdentityKeyPath   string                `json:"identity_key_path,omitempty"`
+	Transfers         []ClientTransferState `json:"transfers"`
 	Credits       []ClientCreditState   `json:"credits,omitempty"`
 	FriendSlots   []protocol.Hash       `json:"friend_slots,omitempty"`
 	DHT           *ClientDHTState       `json:"dht,omitempty"`
@@ -199,11 +201,19 @@ func (c *Client) snapshotState() (*ClientState, error) {
 		return handles[i].GetHash().String() < handles[j].GetHash().String()
 	})
 	state := &ClientState{
-		Version:       clientStateVersion,
-		ServerAddress: c.serverAddr,
-		Transfers:     make([]ClientTransferState, 0, len(handles)),
-		Credits:       c.session.Credits().Snapshot(),
-		FriendSlots:   c.session.friendSlotSnapshot(),
+		Version:         clientStateVersion,
+		ServerAddress:   c.serverAddr,
+		IdentityVersion: 0,
+		IdentityKeyPath: c.session.settings.IdentityKeyPath,
+		Transfers:       make([]ClientTransferState, 0, len(handles)),
+		Credits:         c.session.Credits().Snapshot(),
+		FriendSlots:     c.session.friendSlotSnapshot(),
+	}
+	if id := c.session.Identity(); id != nil {
+		state.IdentityVersion = id.Version
+		if id.KeyPath() != "" {
+			state.IdentityKeyPath = id.KeyPath()
+		}
 	}
 	if tracker := c.GetDHTTracker(); tracker != nil {
 		state.DHT = tracker.SnapshotState()
@@ -252,10 +262,18 @@ func (c *Client) applyState(state *ClientState) error {
 	if state == nil {
 		return nil
 	}
-	if state.Version != 0 && state.Version != 1 && state.Version != 2 && state.Version != 3 && state.Version != clientStateVersion {
+	if state.Version != 0 && state.Version != 1 && state.Version != 2 && state.Version != 3 && state.Version != 4 && state.Version != clientStateVersion {
 		return errors.New("unsupported state version")
 	}
 	c.serverAddr = state.ServerAddress
+	if state.IdentityKeyPath != "" {
+		c.session.settings.IdentityKeyPath = state.IdentityKeyPath
+	}
+	if state.IdentityVersion != 0 {
+		if id := c.session.Identity(); id != nil {
+			id.Version = state.IdentityVersion
+		}
+	}
 	c.session.Credits().ApplySnapshot(state.Credits)
 	c.session.applyFriendSlotSnapshot(state.FriendSlots)
 	if state.DHT != nil {

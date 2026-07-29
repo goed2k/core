@@ -20,11 +20,26 @@ type PeerCredit struct {
 }
 
 type PeerCreditManager struct {
-	credits map[string]*PeerCredit
+	credits             map[string]*PeerCredit
+	creditsOnlyVerified bool
 }
 
 func NewPeerCreditManager() *PeerCreditManager {
 	return &PeerCreditManager{credits: make(map[string]*PeerCredit)}
+}
+
+func (m *PeerCreditManager) SetCreditsOnlyVerified(v bool) {
+	if m == nil {
+		return
+	}
+	m.creditsOnlyVerified = v
+}
+
+func (m *PeerCreditManager) CreditsOnlyVerified() bool {
+	if m == nil {
+		return false
+	}
+	return m.creditsOnlyVerified
 }
 
 func (m *PeerCreditManager) key(hash protocol.Hash) string {
@@ -50,8 +65,11 @@ func (m *PeerCreditManager) credit(hash protocol.Hash) *PeerCredit {
 	return credit
 }
 
-func (m *PeerCreditManager) AddUploaded(hash protocol.Hash, bytes int64) {
+func (m *PeerCreditManager) AddUploaded(hash protocol.Hash, bytes int64, verified bool) {
 	if bytes <= 0 {
+		return
+	}
+	if m.creditsOnlyVerified && !verified {
 		return
 	}
 	if credit := m.credit(hash); credit != nil {
@@ -59,8 +77,11 @@ func (m *PeerCreditManager) AddUploaded(hash protocol.Hash, bytes int64) {
 	}
 }
 
-func (m *PeerCreditManager) AddDownloaded(hash protocol.Hash, bytes int64) {
+func (m *PeerCreditManager) AddDownloaded(hash protocol.Hash, bytes int64, verified bool) {
 	if bytes <= 0 {
+		return
+	}
+	if m.creditsOnlyVerified && !verified {
 		return
 	}
 	if credit := m.credit(hash); credit != nil {

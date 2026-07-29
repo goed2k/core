@@ -29,6 +29,7 @@ type Settings struct {
 	SessionConnectionsLimit int
 	UploadSlots             int
 	MaxUploadRateKB         int
+	MaxDownloadRateKB       int
 	SlotAllocationKB        int
 	UploadQueueSize         int
 	BufferPoolSize          int
@@ -42,6 +43,10 @@ type Settings struct {
 	EnableCryptLayer        bool
 	CryptLayerRequired      bool
 	ObfuscationTCPPort      int
+	EnableSecIdent          bool
+	SecIdentRequired        bool
+	CreditsOnlyVerified     bool
+	IdentityKeyPath         string
 }
 
 func NewSettings() Settings {
@@ -70,6 +75,7 @@ func NewSettings() Settings {
 		SessionConnectionsLimit: 20,
 		UploadSlots:             3,
 		MaxUploadRateKB:         0,
+		MaxDownloadRateKB:       0,
 		SlotAllocationKB:        3,
 		UploadQueueSize:         500,
 		BufferPoolSize:          250,
@@ -83,10 +89,13 @@ func NewSettings() Settings {
 		EnableCryptLayer:        false,
 		CryptLayerRequired:      false,
 		ObfuscationTCPPort:      0,
+		EnableSecIdent:          false,
+		SecIdentRequired:        false,
+		CreditsOnlyVerified:     false,
 	}
 }
 
 func (s Settings) String() string {
-	return fmt.Sprintf("Settings{userAgent=%s, modName='%s', clientName='%s', listenPort=%d, udpPort=%d, enableDHT=%t, enableUPnP=%t, version=%d, modMajor=%d, modMinor=%d, modBuild=%d, maxFailCount=%d, maxPeerListSize=%d, minPeerReconnectTime=%d, peerConnectionTimeout=%d, sessionConnectionsLimit=%d, uploadSlots=%d, maxUploadRateKB=%d, slotAllocationKB=%d, uploadQueueSize=%d, bufferPoolSize=%d, maxConnectionsPerSecond=%d, compressionVersion=%d, serverSearchTimeout=%d, dhtSearchTimeout=%d, serverPingTimeout=%d, reconnectToServer=%t}",
-		s.UserAgent.String(), s.ModName, s.ClientName, s.ListenPort, s.UDPPort, s.EnableDHT, s.EnableUPnP, s.Version, s.ModMajor, s.ModMinor, s.ModBuild, s.MaxFailCount, s.MaxPeerListSize, s.MinPeerReconnectTime, s.PeerConnectionTimeout, s.SessionConnectionsLimit, s.UploadSlots, s.MaxUploadRateKB, s.SlotAllocationKB, s.UploadQueueSize, s.BufferPoolSize, s.MaxConnectionsPerSecond, s.CompressionVersion, s.ServerSearchTimeout, s.DHTSearchTimeout, s.ServerPingTimeout, s.ReconnectToServer)
+	return fmt.Sprintf("Settings{userAgent=%s, modName='%s', clientName='%s', listenPort=%d, udpPort=%d, enableDHT=%t, enableUPnP=%t, version=%d, modMajor=%d, modMinor=%d, modBuild=%d, maxFailCount=%d, maxPeerListSize=%d, minPeerReconnectTime=%d, peerConnectionTimeout=%d, sessionConnectionsLimit=%d, uploadSlots=%d, maxUploadRateKB=%d, maxDownloadRateKB=%d, slotAllocationKB=%d, uploadQueueSize=%d, bufferPoolSize=%d, maxConnectionsPerSecond=%d, compressionVersion=%d, serverSearchTimeout=%d, dhtSearchTimeout=%d, serverPingTimeout=%d, reconnectToServer=%t}",
+		s.UserAgent.String(), s.ModName, s.ClientName, s.ListenPort, s.UDPPort, s.EnableDHT, s.EnableUPnP, s.Version, s.ModMajor, s.ModMinor, s.ModBuild, s.MaxFailCount, s.MaxPeerListSize, s.MinPeerReconnectTime, s.PeerConnectionTimeout, s.SessionConnectionsLimit, s.UploadSlots, s.MaxUploadRateKB, s.MaxDownloadRateKB, s.SlotAllocationKB, s.UploadQueueSize, s.BufferPoolSize, s.MaxConnectionsPerSecond, s.CompressionVersion, s.ServerSearchTimeout, s.DHTSearchTimeout, s.ServerPingTimeout, s.ReconnectToServer)
 }
