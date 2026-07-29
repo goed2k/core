@@ -9,7 +9,12 @@ import (
 	"github.com/goed2k/core/protocol"
 )
 
-const connectionIODeadlineNS = int64(5 * 1000 * 1000)
+const (
+	// connectionIODeadlineNS 为单次读/写 syscall 的超时（纳秒）。
+	// 会话主循环按 tick 轮询各连接；短超时可避免无数据时阻塞整个循环。
+	connectionIODeadlineNS = int64(5 * 1000 * 1000)
+	connectionReadBufSize    = 16 * 1024
+)
 
 type Connection struct {
 	socket        net.Conn
@@ -24,6 +29,7 @@ type Connection struct {
 	header        protocol.PacketHeader
 	headerBuffer  []byte
 	bodyBuffer    []byte
+	readBuf       []byte
 }
 
 type queuedPacket struct {
@@ -42,6 +48,7 @@ func NewConnection(session *Session) Connection {
 		incoming:     make([][]byte, 0),
 		headerBuffer: make([]byte, 0, protocol.PacketHeaderSize),
 		bodyBuffer:   nil,
+		readBuf:      make([]byte, connectionReadBufSize),
 	}
 }
 
@@ -49,7 +56,11 @@ func (c *Connection) DoRead() error {
 	if c.socket == nil {
 		return nil
 	}
-	tmp := make([]byte, 16*1024)
+	tmp := c.readBuf
+	if cap(tmp) < connectionReadBufSize {
+		tmp = make([]byte, connectionReadBufSize)
+		c.readBuf = tmp
+	}
 	_ = c.socket.SetReadDeadline(CurrentTimeToDeadline(connectionIODeadlineNS))
 	n, err := c.socket.Read(tmp)
 	if err != nil {

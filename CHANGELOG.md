@@ -17,6 +17,9 @@
 ### 变更
 
 - **移除** `cmd/goed2k-web` 与 `internal/webapi`：请改用 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)
+- UPnP 调试日志默认关闭（`upnp.Debug`）
+- 连接读缓冲复用，减少每 tick 分配；补充 I/O 超时注释
+- TUI：有任务时进入 `/setting` 显示中文锁定提示
 
 ## [0.1.1] - 2026-07-29
 

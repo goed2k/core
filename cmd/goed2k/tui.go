@@ -680,7 +680,7 @@ func (m tuiModel) executeCommand() (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/setting", "/settings":
 		if len(m.status.Transfers) > 0 {
-			m.statusMessage = "settings are locked after transfers start"
+			m.statusMessage = "设置已锁定：请先移除全部任务后再使用 /setting"
 			return m, nil
 		}
 		m.nextAction = managerActionSettings
