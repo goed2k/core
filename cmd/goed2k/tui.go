@@ -898,11 +898,12 @@ func (m tuiModel) renderEmptyState(width int) string {
 
 func (m tuiModel) renderTransferSection(transfer ed2k.TransferSnapshot, width int) string {
 	kadPeers := countPeersWithSource(transfer.Peers, ed2k.PeerDHT)
+	kadv6Peers := countPeersWithSource(transfer.Peers, ed2k.PeerKADV6)
 	serverPeers := countPeersWithSource(transfer.Peers, ed2k.PeerServer)
 	lines := []string{
 		titleStyle.Render(transfer.FileName),
 		fmt.Sprintf("priority=%s (%s)  state=%s  done=%.2f%%  recv=%.2f%%", transfer.DownloadPriority.Label(), transfer.DownloadPriority.TextLabel(), transfer.Status.State, percent(transfer.Status.TotalDone, transfer.Status.TotalWanted), percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
-		fmt.Sprintf("rate=%s  up=%s  peers=%d  active=%d  kad_peers=%d  server_peers=%d", humanRate(transfer.Status.DownloadRate), humanRate(transfer.Status.UploadRate), transfer.Status.NumPeers, transfer.ActivePeers, kadPeers, serverPeers),
+		fmt.Sprintf("rate=%s  up=%s  peers=%d  active=%d  kad=%d  kadv6=%d  server=%d", humanRate(transfer.Status.DownloadRate), humanRate(transfer.Status.UploadRate), transfer.Status.NumPeers, transfer.ActivePeers, kadPeers, kadv6Peers, serverPeers),
 		fmt.Sprintf("done=%d  recv=%d  total=%d", transfer.Status.TotalDone, transfer.Status.TotalReceived, transfer.Status.TotalWanted),
 		progressBarLine("done", transfer.Status.TotalDone, transfer.Status.TotalWanted, width-8),
 		progressBarLine("recv", transfer.Status.TotalReceived, transfer.Status.TotalWanted, width-8),

@@ -18,7 +18,7 @@ func TestPeerFromKADV6SearchEntry(t *testing.T) {
 			{Type: kadv6.TagTypeUint16, ID: kadv6.TagSourcePort, UInt64: 4662},
 		},
 	}
-	p, ok := PeerFromKADV6SearchEntry(se, int(PeerDHT))
+	p, ok := PeerFromKADV6SearchEntry(se, int(PeerKADV6))
 	if !ok {
 		t.Fatal("expected ok")
 	}
@@ -27,6 +27,9 @@ func TestPeerFromKADV6SearchEntry(t *testing.T) {
 	}
 	if p.Endpoint.Defined() {
 		t.Fatal("ipv6-only should not set ipv4 endpoint")
+	}
+	if p.SourceFlag&int(PeerKADV6) == 0 {
+		t.Fatal("expected PeerKADV6 flag")
 	}
 	if p.CanEncodeAnswerSources2() {
 		t.Fatal("pure ipv6 must not encode in AnswerSources2")

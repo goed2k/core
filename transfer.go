@@ -698,8 +698,9 @@ func (t *Transfer) SecondTick(accumulator *Statistics, tickIntervalMS int64) {
 			t.nextSourcesRequest = now + t.nextServerSourcesInterval(activeConnections, connectCandidates, sent)
 		}
 		if t.nextDHTRequest < now {
-			sent := t.session.SendDHTSourcesRequest(t.hash, t.size, t)
-			t.nextDHTRequest = now + t.nextDHTSourcesInterval(activeConnections, connectCandidates, sent)
+			sent4 := t.session.SendDHTSourcesRequest(t.hash, t.size, t)
+			sent6 := t.session.SendDHTv6SourcesRequest(t.hash, t.size, t)
+			t.nextDHTRequest = now + t.nextDHTSourcesInterval(activeConnections, connectCandidates, sent4 || sent6)
 		}
 	}
 

@@ -367,10 +367,14 @@ func (s *Session) RequestSourcesNow(transfer *Transfer) bool {
 	if dhtSent {
 		sent = true
 	}
+	dhtv6Sent := s.SendDHTv6SourcesRequest(transfer.hash, transfer.size, transfer)
+	if dhtv6Sent {
+		sent = true
+	}
 	now := CurrentTime()
 	transfer.nextSourcesRequest = now + transfer.nextServerSourcesInterval(activePeers, knownPeers, serverSent)
-	transfer.nextDHTRequest = now + transfer.nextDHTSourcesInterval(activePeers, knownPeers, dhtSent)
-	logx.Debug("source discovery triggered", "hash", transfer.hash.String(), "server", serverSent, "dht", dhtSent, "active_peers", activePeers, "known_peers", knownPeers)
+	transfer.nextDHTRequest = now + transfer.nextDHTSourcesInterval(activePeers, knownPeers, dhtSent || dhtv6Sent)
+	logx.Debug("source discovery triggered", "hash", transfer.hash.String(), "server", serverSent, "dht", dhtSent, "kadv6", dhtv6Sent, "active_peers", activePeers, "known_peers", knownPeers)
 	return sent
 }
 

@@ -300,6 +300,9 @@ func (p Policy) GetSourceRank(sourceBitmask int) int {
 	if IsBit(int32(sourceBitmask), int32(PeerDHT)) {
 		ret |= 1 << 4
 	}
+	if IsBit(int32(sourceBitmask), int32(PeerKADV6)) {
+		ret |= 1 << 5
+	}
 	if IsBit(int32(sourceBitmask), int32(PeerIncoming)) {
 		ret |= 1 << 3
 	}
