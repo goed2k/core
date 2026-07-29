@@ -653,6 +653,7 @@ type settingsModel struct {
 	udpPortV6Input         textinput.Model
 	peerTimeoutInput       textinput.Model
 	maxDownloadRateKBInput textinput.Model
+	maxUploadRateKBInput   textinput.Model
 	timeoutInput           textinput.Model
 	identityKeyInput       textinput.Model
 	categoriesInput        textinput.Model
@@ -662,7 +663,7 @@ type settingsModel struct {
 	submitted              bool
 }
 
-const settingsFocusCount = 24
+const settingsFocusCount = 25
 
 func runSettingsTUI(initial runConfig) (runConfig, error) {
 	model := newSettingsModel(initial)
@@ -697,6 +698,7 @@ func newSettingsModel(cfg runConfig) settingsModel {
 	m.udpPortV6Input = newSetupInput("4672", strconv.Itoa(cfg.udpPortV6))
 	m.peerTimeoutInput = newSetupInput("30", strconv.Itoa(cfg.peerTimeout))
 	m.maxDownloadRateKBInput = newSetupInput("0=unlimited", strconv.Itoa(cfg.maxDownloadRateKB))
+	m.maxUploadRateKBInput = newSetupInput("0=unlimited", strconv.Itoa(cfg.maxUploadRateKB))
 	timeoutValue := ""
 	if cfg.timeout > 0 {
 		timeoutValue = cfg.timeout.String()
@@ -739,24 +741,28 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableKADV6 = !m.cfg.enableKADV6
 				return m, nil
 			}
-			if m.focus == 16 {
+			if m.focus == 17 {
 				m.cfg.enableCryptLayer = !m.cfg.enableCryptLayer
 				return m, nil
 			}
-			if m.focus == 17 {
+			if m.focus == 18 {
 				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
 				return m, nil
 			}
 			if m.focus == 20 {
-				m.cfg.enableCryptLayerRequired = !m.cfg.enableCryptLayerRequired
+				m.cfg.secIdentRequired = !m.cfg.secIdentRequired
 				return m, nil
 			}
 			if m.focus == 21 {
+				m.cfg.enableCryptLayerRequired = !m.cfg.enableCryptLayerRequired
+				return m, nil
+			}
+			if m.focus == 22 {
 				m.cfg.creditsOnlyVerified = !m.cfg.creditsOnlyVerified
 				return m, nil
 			}
 		case "enter":
-			if m.focus == 23 {
+			if m.focus == 24 {
 				next, cmd := m.submit()
 				return next, cmd
 			}
@@ -772,19 +778,23 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableKADV6 = !m.cfg.enableKADV6
 				return m, nil
 			}
-			if m.focus == 16 {
+			if m.focus == 17 {
 				m.cfg.enableCryptLayer = !m.cfg.enableCryptLayer
 				return m, nil
 			}
-			if m.focus == 17 {
+			if m.focus == 18 {
 				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
 				return m, nil
 			}
 			if m.focus == 20 {
-				m.cfg.enableCryptLayerRequired = !m.cfg.enableCryptLayerRequired
+				m.cfg.secIdentRequired = !m.cfg.secIdentRequired
 				return m, nil
 			}
 			if m.focus == 21 {
+				m.cfg.enableCryptLayerRequired = !m.cfg.enableCryptLayerRequired
+				return m, nil
+			}
+			if m.focus == 22 {
 				m.cfg.creditsOnlyVerified = !m.cfg.creditsOnlyVerified
 				return m, nil
 			}
@@ -821,10 +831,12 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case 14:
 		m.maxDownloadRateKBInput, cmd = m.maxDownloadRateKBInput.Update(msg)
 	case 15:
+		m.maxUploadRateKBInput, cmd = m.maxUploadRateKBInput.Update(msg)
+	case 16:
 		m.timeoutInput, cmd = m.timeoutInput.Update(msg)
-	case 18:
+	case 19:
 		m.identityKeyInput, cmd = m.identityKeyInput.Update(msg)
-	case 22:
+	case 23:
 		m.categoriesInput, cmd = m.categoriesInput.Update(msg)
 	}
 	return m, cmd
@@ -849,14 +861,16 @@ func (m settingsModel) View() string {
 		m.renderField(12, "UDP6 port", m.udpPortV6Input.View()),
 		m.renderField(13, "Peer timeout", m.peerTimeoutInput.View()),
 		m.renderField(14, "DL rate KB/s", m.maxDownloadRateKBInput.View()),
-		m.renderField(15, "Timeout", m.timeoutInput.View()),
-		m.renderToggle(16, "CryptLayer", m.cfg.enableCryptLayer),
-		m.renderToggle(17, "SecIdent", m.cfg.enableSecIdent),
-		m.renderField(18, "Identity key", m.identityKeyInput.View()),
-		m.renderToggle(20, "Crypt req", m.cfg.enableCryptLayerRequired),
-		m.renderToggle(21, "Credits ver", m.cfg.creditsOnlyVerified),
-		m.renderField(22, "Categories", m.categoriesInput.View()),
-		m.renderStart(23, "[ Save settings ]"),
+		m.renderField(15, "UL rate KB/s", m.maxUploadRateKBInput.View()),
+		m.renderField(16, "Timeout", m.timeoutInput.View()),
+		m.renderToggle(17, "CryptLayer", m.cfg.enableCryptLayer),
+		m.renderToggle(18, "SecIdent", m.cfg.enableSecIdent),
+		m.renderField(19, "Identity key", m.identityKeyInput.View()),
+		m.renderToggle(20, "SecIdent req", m.cfg.secIdentRequired),
+		m.renderToggle(21, "Crypt req", m.cfg.enableCryptLayerRequired),
+		m.renderToggle(22, "Credits ver", m.cfg.creditsOnlyVerified),
+		m.renderField(23, "Categories", m.categoriesInput.View()),
+		m.renderStart(24, "[ Save settings ]"),
 		"",
 		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP/KADV6/Crypt/SecIdent • Enter save • q quit"),
 	}
@@ -911,6 +925,7 @@ func (m *settingsModel) syncFocus() {
 		&m.udpPortV6Input,
 		&m.peerTimeoutInput,
 		&m.maxDownloadRateKBInput,
+		&m.maxUploadRateKBInput,
 		&m.timeoutInput,
 		&m.identityKeyInput,
 		&m.categoriesInput,
@@ -944,10 +959,12 @@ func (m *settingsModel) syncFocus() {
 	case 14:
 		m.maxDownloadRateKBInput.Focus()
 	case 15:
+		m.maxUploadRateKBInput.Focus()
+	case 16:
 		m.timeoutInput.Focus()
-	case 18:
+	case 19:
 		m.identityKeyInput.Focus()
-	case 22:
+	case 23:
 		m.categoriesInput.Focus()
 	}
 }
@@ -989,6 +1006,11 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 		m.status = err.Error()
 		return *m, nil
 	}
+	maxUploadRateKB, err := parseIntField("upload rate", m.maxUploadRateKBInput.Value())
+	if err != nil {
+		m.status = err.Error()
+		return *m, nil
+	}
 	timeout, err := parseDurationField(m.timeoutInput.Value())
 	if err != nil {
 		m.status = err.Error()
@@ -999,6 +1021,7 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 	cfg.udpPortV6 = udpPortV6
 	cfg.peerTimeout = peerTimeout
 	cfg.maxDownloadRateKB = maxDownloadRateKB
+	cfg.maxUploadRateKB = maxUploadRateKB
 	cfg.timeout = timeout
 	cfg.identityKeyPath = strings.TrimSpace(m.identityKeyInput.Value())
 	cfg.categoriesConfig = strings.TrimSpace(m.categoriesInput.Value())

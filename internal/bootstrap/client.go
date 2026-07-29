@@ -26,10 +26,12 @@ func BuildSettings(cfg Config) (ed2k.Settings, error) {
 	settings.EnableCryptLayer = cfg.EnableCryptLayer
 	settings.CryptLayerRequired = cfg.EnableCryptLayerRequired
 	settings.EnableSecIdent = cfg.EnableSecIdent
+	settings.SecIdentRequired = cfg.SecIdentRequired
 	settings.CreditsOnlyVerified = cfg.CreditsOnlyVerified
 	settings.IdentityKeyPath = cfg.IdentityKeyPath
 	settings.PeerConnectionTimeout = cfg.PeerTimeout
 	settings.MaxDownloadRateKB = cfg.MaxDownloadRateKB
+	settings.MaxUploadRateKB = cfg.MaxUploadRateKB
 	if cfg.CategoriesConfig != "" {
 		cats, err := ed2k.ParseCategoriesConfig(cfg.CategoriesConfig)
 		if err != nil {

@@ -29,6 +29,7 @@ type Config struct {
 	EnableCryptLayer         bool
 	EnableCryptLayerRequired bool
 	EnableSecIdent           bool
+	SecIdentRequired         bool
 	CreditsOnlyVerified      bool
 	IdentityKeyPath          string
 	CategoriesConfig         string
@@ -38,6 +39,7 @@ type Config struct {
 	KADV6Nodes               string
 	PeerTimeout              int
 	MaxDownloadRateKB        int
+	MaxUploadRateKB          int
 	Timeout                  time.Duration
 	StatePath                string
 	DisableState             bool
@@ -113,6 +115,8 @@ func (cfg *Config) ApplyEnv(prefix string) {
 	setInt("UDP_PORT_V6", &cfg.UDPPortV6)
 	setInt("PEER_TIMEOUT", &cfg.PeerTimeout)
 	setInt("MAX_DOWNLOAD_RATE_KB", &cfg.MaxDownloadRateKB)
+	setInt("MAX_UPLOAD_RATE_KB", &cfg.MaxUploadRateKB)
+	setBool("SEC_IDENT_REQUIRED", &cfg.SecIdentRequired)
 	setBool("KAD", &cfg.EnableKAD)
 	setBool("KADV6", &cfg.EnableKADV6)
 	setBool("UPNP", &cfg.EnableUPnP)
@@ -121,6 +125,12 @@ func (cfg *Config) ApplyEnv(prefix string) {
 	setBool("SEC_IDENT", &cfg.EnableSecIdent)
 	setBool("CREDITS_ONLY_VERIFIED", &cfg.CreditsOnlyVerified)
 	setBool("NO_STATE", &cfg.DisableState)
+	if v := strings.TrimSpace(os.Getenv(prefix + "SECURE")); v != "" {
+		if b, ok := parseBool(v); ok && b {
+			cfg.EnableCryptLayer = true
+			cfg.EnableSecIdent = true
+		}
+	}
 	if links := strings.TrimSpace(os.Getenv(prefix + "LINKS")); links != "" {
 		cfg.Links = SplitCommaList(links)
 	}

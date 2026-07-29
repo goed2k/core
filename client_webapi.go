@@ -13,6 +13,8 @@ type PublicSettings struct {
 	UDPPort             int    `json:"udp_port"`
 	UDPPortV6           int    `json:"udp_port_v6"`
 	MaxDownloadRateKB   int    `json:"max_download_rate_kb"`
+	MaxUploadRateKB     int    `json:"max_upload_rate_kb"`
+	SecIdentRequired    bool   `json:"sec_ident_required"`
 	IdentityKeyPath     string `json:"identity_key_path,omitempty"`
 	CategoryCount       int    `json:"category_count"`
 }
@@ -35,6 +37,8 @@ func (c *Client) SettingsSnapshot() PublicSettings {
 		UDPPort:             st.UDPPort,
 		UDPPortV6:           st.UDPPortV6,
 		MaxDownloadRateKB:   st.MaxDownloadRateKB,
+		MaxUploadRateKB:     st.MaxUploadRateKB,
+		SecIdentRequired:    st.SecIdentRequired,
 		IdentityKeyPath:     st.IdentityKeyPath,
 		CategoryCount:       len(st.Categories),
 	}

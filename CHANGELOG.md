@@ -12,6 +12,7 @@
 - CLI 补全参数：`--server`、`--out-dir`、`--kad`、`--upnp`、`--listen-port`、`--link`、`--setup`、`--timeout` 等
 - 共享包 `internal/bootstrap`：CLI 客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
 - `--timeout` / `--link` 模式下 TUI 在任务全部完成或超时后自动退出
+- CLI：`--sec-ident-required`、`--max-upload-rate-kb`、`--secure`（CryptLayer + SecIdent 预设）
 
 ### 变更
 
