@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"path/filepath"
+	"strings"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/internal/logx"
@@ -104,14 +105,14 @@ func (m *MiscOptions2) SetLargeFiles()             { m.Value |= 1 << largeFileOf
 func (m *MiscOptions2) Assign(value int)           { m.Value = value }
 
 type RemotePeerInfo struct {
-	Point             protocol.Endpoint
-	NickName          string
-	ModName           string
-	Version           int
-	ModVersion        string
-	ModNumber         int
-	Misc1             MiscOptions
-	Misc2             MiscOptions2
+	Point           protocol.Endpoint
+	NickName        string
+	ModName         string
+	Version         int
+	ModVersion      string
+	ModNumber       int
+	Misc1           MiscOptions
+	Misc2           MiscOptions2
 	SecIdentVersion int
 	SecIdentKeyFP   uint32
 }
@@ -171,7 +172,7 @@ type PeerConnection struct {
 	remotePubKey       []byte
 	remoteChallenge    uint32
 	ourChallenge       uint32
-	remoteSecIdentVer int
+	remoteSecIdentVer  int
 	remoteKeyFP        uint32
 	helloInfoFlags     byte
 	remoteFileRating   byte
@@ -180,29 +181,29 @@ type PeerConnection struct {
 
 func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Transfer, peerInfo *Peer) *PeerConnection {
 	return &PeerConnection{
-		Connection:     NewConnection(session),
-		transfer:       transfer,
-		speed:          PeerSpeedSlow,
-		peerInfo:       peerInfo,
-		endpoint:       point,
-		remotePeerInfo: RemotePeerInfo{},
-		combiner:       clientproto.NewPacketCombiner(),
-		downloadQueue:  make([]PendingBlock, 0),
-		uploadBlocks:   make([]RequestedUploadBlock, 0),
-		uploadDone:     make([]RequestedUploadBlock, 0),
+		Connection:       NewConnection(session),
+		transfer:         transfer,
+		speed:            PeerSpeedSlow,
+		peerInfo:         peerInfo,
+		endpoint:         point,
+		remotePeerInfo:   RemotePeerInfo{},
+		combiner:         clientproto.NewPacketCombiner(),
+		downloadQueue:    make([]PendingBlock, 0),
+		uploadBlocks:     make([]RequestedUploadBlock, 0),
+		uploadDone:       make([]RequestedUploadBlock, 0),
 		pendingAICHPiece: -1,
 	}
 }
 
 func NewIncomingPeerConnection(session *Session, conn net.Conn, forceObfuscated bool) *PeerConnection {
 	pc := &PeerConnection{
-		Connection:     NewConnection(session),
-		speed:          PeerSpeedSlow,
-		remotePeerInfo: RemotePeerInfo{},
-		combiner:       clientproto.NewPacketCombiner(),
-		downloadQueue:  make([]PendingBlock, 0),
-		uploadBlocks:   make([]RequestedUploadBlock, 0),
-		uploadDone:     make([]RequestedUploadBlock, 0),
+		Connection:       NewConnection(session),
+		speed:            PeerSpeedSlow,
+		remotePeerInfo:   RemotePeerInfo{},
+		combiner:         clientproto.NewPacketCombiner(),
+		downloadQueue:    make([]PendingBlock, 0),
+		uploadBlocks:     make([]RequestedUploadBlock, 0),
+		uploadDone:       make([]RequestedUploadBlock, 0),
 		pendingAICHPiece: -1,
 	}
 	if forceObfuscated || session.settings.EnableCryptLayer || session.settings.CryptLayerRequired {
@@ -1288,6 +1289,9 @@ func (p *PeerConnection) SetTransfer(transfer *Transfer) {
 }
 
 func (p *PeerConnection) GetInfo() PeerInfo {
+	if p == nil {
+		return PeerInfo{}
+	}
 	stats := p.Statistics()
 	info := PeerInfo{
 		DownloadSpeed:        int(stats.DownloadRate()),
@@ -1300,7 +1304,7 @@ func (p *PeerConnection) GetInfo() PeerInfo {
 	}
 	info.UserHash = p.remoteHash
 	info.NickName = p.remotePeerInfo.NickName
-	info.Connected = p != nil && p.socket != nil && !p.IsDisconnecting()
+	info.Connected = p.socket != nil && !p.IsDisconnecting()
 	if p.session != nil {
 		info.TotalUploaded, info.TotalDownloaded = p.session.Credits().TotalsForPeer(p.remoteHash)
 	}
@@ -1700,18 +1704,46 @@ func (p *PeerConnection) HandleRequestSources2(req *clientproto.RequestSources2)
 		return
 	}
 	res := p.attachUploadByHash(req.Hash)
-	tf, ok := res.(*Transfer)
-	if !ok || tf == nil {
+	if tf, ok := res.(*Transfer); ok && tf != nil {
+		peers := tf.policy.PeersForSourceExchange(p.endpoint, SourceExchangePeerLimit)
+		if len(peers) == 0 {
+			return
+		}
+		entries := p.buildSourceExchangeEntries(peers)
+		p.sendAnswerSources2(req.Hash, entries)
 		return
 	}
-	peers := tf.policy.PeersForSourceExchange(p.endpoint, SourceExchangePeerLimit)
-	if len(peers) == 0 {
+	if sf, ok := res.(*SharedFile); ok && sf != nil {
+		_ = sf
+		p.sendAnswerSources2SelfOnly(req.Hash)
+	}
+}
+
+func (p *PeerConnection) sendAnswerSources2SelfOnly(hash protocol.Hash) {
+	ep := p.session.kadPublishEndpoint()
+	if !ep.Defined() {
 		return
 	}
-	entries := p.buildSourceExchangeEntries(peers)
+	sx1 := p.remotePeerInfo.Misc1.SourceExchange1Ver
+	uid := uint32(ep.IP())
+	if sx1 <= 2 {
+		uid = clientproto.SwapUint32(uid)
+	}
+	entries := []clientproto.SourceExchangeEntry{{
+		UserID:       uid,
+		TCPPort:      uint16(ep.Port()),
+		CryptOptions: cryptOptionsForLocal(p.session.settings),
+	}}
+	p.sendAnswerSources2(hash, entries)
+}
+
+func (p *PeerConnection) sendAnswerSources2(hash protocol.Hash, entries []clientproto.SourceExchangeEntry) {
+	if len(entries) == 0 {
+		return
+	}
 	ans := clientproto.AnswerSources2{
 		Version: clientproto.SourceExchange2Version,
-		Hash:    req.Hash,
+		Hash:    hash,
 		Entries: entries,
 	}
 	raw, err := p.combiner.Pack("client.AnswerSources2", &ans)
@@ -1719,6 +1751,22 @@ func (p *PeerConnection) HandleRequestSources2(req *clientproto.RequestSources2)
 		return
 	}
 	debugPeerf("peer %s -> AnswerSources2 entries=%d", p.endpoint.String(), len(entries))
+	p.QueuePacket(raw)
+}
+
+func (p *PeerConnection) maybeSendFileComment() {
+	if p.transfer == nil {
+		return
+	}
+	comment := strings.TrimSpace(p.transfer.FileComment())
+	if comment == "" {
+		return
+	}
+	packet := clientproto.FileComment{Comment: []byte(comment)}
+	raw, err := p.combiner.Pack("client.FileComment", &packet)
+	if err != nil {
+		return
+	}
 	p.QueuePacket(raw)
 }
 
@@ -1834,6 +1882,7 @@ func (p *PeerConnection) applyExtHelloTags(props *protocol.TagList) {
 
 func (p *PeerConnection) markHelloInfoDone() {
 	p.helloInfoFlags |= helloInfoStandard
+	p.maybeSendFileComment()
 	p.maybeStartSecIdent()
 }
 

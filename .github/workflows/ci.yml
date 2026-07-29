@@ -15,18 +15,43 @@ concurrency:
 
 jobs:
   test:
-    name: Test & Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: Test & Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
+      - name: Configure Git line endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: '1.26'
           cache: true
+
+      - name: Verify formatting
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed for:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Staticcheck
+        shell: bash
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          "$(go env GOPATH)/bin/staticcheck" ./...
 
       - name: Vet
         run: go vet ./...
@@ -36,9 +61,8 @@ jobs:
 
       - name: Build binaries
         run: |
-          go build -o /dev/null ./cmd/goed2k
-          go build -o /dev/null ./cmd/goed2k-web
+          go build ./cmd/goed2k
+          go build ./cmd/goed2k-web
 
       - name: Build examples
-        run: |
-          go build -o /dev/null ./examples/...
+        run: go build ./examples/...

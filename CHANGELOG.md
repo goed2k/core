@@ -6,15 +6,29 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-29
+
 ### 新增
 
-- GitHub Actions CI：push/PR 自动运行 `go vet`、`-race` 单元测试与构建
-- 外网联调测试默认跳过（`GOED2K_RUN_LIVE_TESTS=1` 手动启用）
-- KADV6 IPv6 联调测试（`GOED2K_RUN_KADV6_INTEGRATION=1` 手动启用）
-- `applyState` 恢复 Secure Ident 密钥（`LoadIdentity`）
-- KAD 发布单测（`session_kad_publish_test.go`）
-- CLI/TUI：`--crypt-layer`、`--sec-ident`、`--identity-key`
-- `Client.LoadIdentity` 公开 API
+- Go **1.26** 为唯一支持版本；CI 多 OS（Ubuntu/Windows）+ staticcheck + gofmt 检查
+- `testdata/server.met` 内嵌 fixture，测试不再依赖外部 jed2k 仓库
+- CLI：`--crypt-layer-required`、`--credits-only-verified`、`--max-download-rate-kb`、`--categories`
+- TUI 设置页：CryptLayer 强制、Credits 仅验证 peer、分类规则、Identity key
+- TUI Setup 向导：CryptLayer / SecIdent 开关
+- Web API：`/settings`、`/dht`、`/dhtv6`、`/search`、`/shared` 端点
+- KAD 完成发布时自动发布 Notes（任务 `FileComment`）
+- 出站 `FileComment` 包（握手完成后）
+- 共享文件 `RequestSources2` 应答本机源
+- 显式 `tcp6` 入站监听（与 IPv4 并行）
+- Release / Integration GitHub Actions 工作流
+- 集成测试：`protocol_e2e_test.go`（SecIdent、AICH、CryptLayer、SharedFile SX）
+- 分类配置持久化（`client_state` v7）
+- `Client.LoadIdentity` / `SettingsSnapshot` / `SharedFileSnapshots` API
+
+### 修复
+
+- 启用 `--sec-ident` 但未指定密钥时自动使用默认路径 `goed2k-identity.pem`
+- CHANGELOG v0.1.0 已知限制描述过时（TUI 已暴露 CryptLayer/SecIdent）
 
 ## [0.1.0] - 2026-07-29
 
@@ -46,7 +60,7 @@
 
 - KADV6 与经典 Kad **不互通**，需分别启用
 - 纯 IPv6 来源不参与 `AnswerSources2` 广播
-- Secure Ident / CryptLayer 默认关闭，TUI 暂未暴露开关
+- Secure Ident / CryptLayer 默认关闭；可通过 CLI/TUI 启用
 - KADV6 发布在无可用 IPv6 端点时静默跳过
 - `.part.met` 为 goed2k JSON 格式，非 eMule 原生二进制
 
@@ -61,6 +75,7 @@
 
 - 初始公开版本，模块路径 `github.com/goed2k/core`
 
+[0.1.1]: https://github.com/goed2k/core/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/goed2k/core/compare/v0.0.2...v0.1.0
 [0.0.2]: https://github.com/goed2k/core/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/goed2k/core/releases/tag/v0.0.1

@@ -19,6 +19,11 @@ type ClientAPI interface {
 	PauseTransfer(hash protocol.Hash) error
 	ResumeTransfer(hash protocol.Hash) error
 	RemoveTransfer(hash protocol.Hash, deleteFile bool) error
+	DHTStatus() ed2k.DHTStatus
+	DHTv6Status() ed2k.KADV6Status
+	SearchSnapshot() ed2k.SearchSnapshot
+	SharedFileSnapshots() []ed2k.SharedFileSnapshot
+	SettingsSnapshot() ed2k.PublicSettings
 }
 
 // Handler 提供基于 net/http 的 REST API。
@@ -51,6 +56,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "status" && r.Method == http.MethodGet:
 		h.handleStatus(w, r)
+	case path == "settings" && r.Method == http.MethodGet:
+		h.handleSettings(w, r)
+	case path == "dht" && r.Method == http.MethodGet:
+		h.handleDHT(w, r)
+	case path == "dhtv6" && r.Method == http.MethodGet:
+		h.handleDHTv6(w, r)
+	case path == "search" && r.Method == http.MethodGet:
+		h.handleSearch(w, r)
+	case path == "shared" && r.Method == http.MethodGet:
+		h.handleShared(w, r)
 	case path == "transfers" && r.Method == http.MethodGet:
 		h.handleListTransfers(w, r)
 	case path == "transfers" && r.Method == http.MethodPost:
@@ -81,7 +96,29 @@ func (h *Handler) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		TransferCount: len(status.Transfers),
 		PeerCount:     len(status.Peers),
 		ServerCount:   len(status.Servers),
+		DHTLiveNodes:  h.Client.DHTStatus().LiveNodes,
+		DHTv6Live:     h.Client.DHTv6Status().LiveNodes,
 	})
+}
+
+func (h *Handler) handleSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.Client.SettingsSnapshot())
+}
+
+func (h *Handler) handleDHT(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.Client.DHTStatus())
+}
+
+func (h *Handler) handleDHTv6(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.Client.DHTv6Status())
+}
+
+func (h *Handler) handleSearch(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.Client.SearchSnapshot())
+}
+
+func (h *Handler) handleShared(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.Client.SharedFileSnapshots())
 }
 
 func (h *Handler) handleListTransfers(w http.ResponseWriter, _ *http.Request) {
@@ -182,6 +219,8 @@ type statusResponse struct {
 	TransferCount int   `json:"transfer_count"`
 	PeerCount     int   `json:"peer_count"`
 	ServerCount   int   `json:"server_count"`
+	DHTLiveNodes  int   `json:"dht_live_nodes"`
+	DHTv6Live     int   `json:"dhtv6_live_nodes"`
 }
 
 type addTransferRequest struct {
@@ -189,21 +228,21 @@ type addTransferRequest struct {
 }
 
 type transferResponse struct {
-	Hash             string  `json:"hash"`
-	FileName         string  `json:"file_name"`
-	FilePath         string  `json:"file_path"`
-	Size             int64   `json:"size"`
-	State            string  `json:"state"`
-	Paused           bool    `json:"paused"`
-	DownloadRate     int     `json:"download_rate"`
-	TotalDone        int64   `json:"total_done"`
-	TotalReceived    int64   `json:"total_received"`
-	TotalWanted      int64   `json:"total_wanted"`
-	ActivePeers      int     `json:"active_peers"`
-	Priority         string  `json:"priority"`
-	PriorityLabel    string  `json:"priority_label"`
-	DonePercent      float64 `json:"done_percent"`
-	ReceivedPercent  float64 `json:"received_percent"`
+	Hash            string  `json:"hash"`
+	FileName        string  `json:"file_name"`
+	FilePath        string  `json:"file_path"`
+	Size            int64   `json:"size"`
+	State           string  `json:"state"`
+	Paused          bool    `json:"paused"`
+	DownloadRate    int     `json:"download_rate"`
+	TotalDone       int64   `json:"total_done"`
+	TotalReceived   int64   `json:"total_received"`
+	TotalWanted     int64   `json:"total_wanted"`
+	ActivePeers     int     `json:"active_peers"`
+	Priority        string  `json:"priority"`
+	PriorityLabel   string  `json:"priority_label"`
+	DonePercent     float64 `json:"done_percent"`
+	ReceivedPercent float64 `json:"received_percent"`
 }
 
 func newTransferResponse(snap ed2k.TransferSnapshot) transferResponse {

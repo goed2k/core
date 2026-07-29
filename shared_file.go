@@ -23,12 +23,12 @@ type SharedFile struct {
 	Hash        protocol.Hash
 	aichRoot    protocol.AICHHash
 	FileSize    int64
-	Path         string
-	Name         string
-	PieceHashes  []protocol.Hash
-	Origin       SharedOrigin
-	Completed    bool
-	LastHashAt   int64
+	Path        string
+	Name        string
+	PieceHashes []protocol.Hash
+	Origin      SharedOrigin
+	Completed   bool
+	LastHashAt  int64
 }
 
 // FileLabel 用于协议中的展示名（通常为文件名）。

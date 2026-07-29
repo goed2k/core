@@ -56,6 +56,12 @@ func (f *fakeClient) RemoveTransfer(hash protocol.Hash, deleteFile bool) error {
 	return nil
 }
 
+func (f *fakeClient) DHTStatus() ed2k.DHTStatus                      { return ed2k.DHTStatus{} }
+func (f *fakeClient) DHTv6Status() ed2k.KADV6Status                  { return ed2k.KADV6Status{} }
+func (f *fakeClient) SearchSnapshot() ed2k.SearchSnapshot            { return ed2k.SearchSnapshot{} }
+func (f *fakeClient) SharedFileSnapshots() []ed2k.SharedFileSnapshot { return nil }
+func (f *fakeClient) SettingsSnapshot() ed2k.PublicSettings          { return ed2k.PublicSettings{} }
+
 func TestHandlerStatus(t *testing.T) {
 	h := NewHandler(&fakeClient{
 		status: ed2k.ClientStatus{
@@ -167,7 +173,7 @@ func TestHandlerTransferActions(t *testing.T) {
 
 	hashHex := hash.String()
 	for _, action := range []struct {
-		path string
+		path  string
 		check func() bool
 	}{
 		{"/transfers/" + hashHex + "/pause", func() bool { return paused }},
@@ -202,6 +208,18 @@ func TestHandlerBasicAuth(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandlerExtendedRoutes(t *testing.T) {
+	h := NewHandler(&fakeClient{}, ".", "", "")
+	for _, path := range []string{"/settings", "/dht", "/dhtv6", "/search", "/shared"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d", path, rec.Code)
+		}
 	}
 }
 

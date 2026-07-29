@@ -2,6 +2,7 @@ package goed2k
 
 import (
 	"net"
+	"strings"
 	"time"
 
 	"github.com/goed2k/core/internal/logx"
@@ -97,6 +98,17 @@ func (s *Session) publishSingleTransferKAD(tracker *DHTTracker, ep protocol.Endp
 	}
 	if !tracker.PublishKeyword(keywordHash, entry) {
 		logx.Debug("kad publish keyword skipped or failed", "keyword", keyword, "hash", hash.String())
+	}
+	if comment := strings.TrimSpace(t.FileComment()); comment != "" {
+		note := kadproto.SearchEntry{
+			ID: kadproto.NewID(hash),
+			Tags: []kadproto.Tag{
+				{Type: kadproto.TagTypeString, ID: protocol.FTFileComment, String: comment},
+			},
+		}
+		if !tracker.PublishNotes(hash, note) {
+			logx.Debug("kad publish notes skipped or failed", "hash", hash.String())
+		}
 	}
 }
 

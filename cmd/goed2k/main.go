@@ -20,26 +20,29 @@ const (
 )
 
 type runConfig struct {
-	links             []string
-	outDir            string
-	serverAddr        string
-	serverMetPath     string
-	listenPort        int
-	udpPort           int
-	udpPortV6         int
-	enableKAD         bool
-	enableKADV6       bool
-	enableUPnP        bool
-	enableCryptLayer  bool
-	enableSecIdent    bool
-	identityKeyPath   string
-	kadNodesDat       string
-	kadNodes          string
-	kadv6NodesDat     string
-	kadv6Nodes        string
-	peerTimeout       int
-	maxDownloadRateKB int
-	timeout           time.Duration
+	links                    []string
+	outDir                   string
+	serverAddr               string
+	serverMetPath            string
+	listenPort               int
+	udpPort                  int
+	udpPortV6                int
+	enableKAD                bool
+	enableKADV6              bool
+	enableUPnP               bool
+	enableCryptLayer         bool
+	enableCryptLayerRequired bool
+	enableSecIdent           bool
+	creditsOnlyVerified      bool
+	identityKeyPath          string
+	categoriesConfig         string
+	kadNodesDat              string
+	kadNodes                 string
+	kadv6NodesDat            string
+	kadv6Nodes               string
+	peerTimeout              int
+	maxDownloadRateKB        int
+	timeout                  time.Duration
 }
 
 type appContext struct {
@@ -55,8 +58,12 @@ func main() {
 	cfg := defaultRunConfig()
 	flag.BoolVar(&cfg.enableKADV6, "kadv6", cfg.enableKADV6, "enable KADV6 IPv6 DHT")
 	flag.BoolVar(&cfg.enableCryptLayer, "crypt-layer", cfg.enableCryptLayer, "enable TCP protocol obfuscation (CryptLayer)")
+	flag.BoolVar(&cfg.enableCryptLayerRequired, "crypt-layer-required", cfg.enableCryptLayerRequired, "require CryptLayer for peer connections")
 	flag.BoolVar(&cfg.enableSecIdent, "sec-ident", cfg.enableSecIdent, "enable Secure Ident handshake")
+	flag.BoolVar(&cfg.creditsOnlyVerified, "credits-only-verified", cfg.creditsOnlyVerified, "only accumulate credits for SecIdent-verified peers")
 	flag.StringVar(&cfg.identityKeyPath, "identity-key", cfg.identityKeyPath, "path to RSA identity private key PEM for Secure Ident")
+	flag.IntVar(&cfg.maxDownloadRateKB, "max-download-rate-kb", cfg.maxDownloadRateKB, "global download rate limit in KB/s (0=unlimited)")
+	flag.StringVar(&cfg.categoriesConfig, "categories", cfg.categoriesConfig, "download categories: name:ext1,ext2:dir;name2:ext:dir2")
 	flag.IntVar(&cfg.udpPortV6, "udp-port-v6", cfg.udpPortV6, "KADV6 UDP listen port")
 	flag.StringVar(&cfg.kadv6NodesDat, "kadv6-nodes-dat", cfg.kadv6NodesDat, "KADV6 nodes6.dat path or URL")
 	flag.StringVar(&cfg.kadv6Nodes, "kadv6-bootstrap", cfg.kadv6Nodes, "KADV6 bootstrap nodes")
@@ -121,10 +128,19 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	settings.EnableDHTv6 = cfg.enableKADV6
 	settings.EnableUPnP = cfg.enableUPnP
 	settings.EnableCryptLayer = cfg.enableCryptLayer
+	settings.CryptLayerRequired = cfg.enableCryptLayerRequired
 	settings.EnableSecIdent = cfg.enableSecIdent
+	settings.CreditsOnlyVerified = cfg.creditsOnlyVerified
 	settings.IdentityKeyPath = cfg.identityKeyPath
 	settings.PeerConnectionTimeout = cfg.peerTimeout
 	settings.MaxDownloadRateKB = cfg.maxDownloadRateKB
+	if cfg.categoriesConfig != "" {
+		cats, err := ed2k.ParseCategoriesConfig(cfg.categoriesConfig)
+		if err != nil {
+			return nil, fmt.Errorf("parse categories: %w", err)
+		}
+		settings.Categories = cats
+	}
 
 	client := ed2k.NewClient(settings)
 	if cfg.enableKAD {
@@ -133,8 +149,12 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	if cfg.enableKADV6 {
 		client.EnableDHTv6()
 	}
-	if cfg.identityKeyPath != "" {
-		if err := client.LoadIdentity(cfg.identityKeyPath); err != nil {
+	identityPath := strings.TrimSpace(cfg.identityKeyPath)
+	if cfg.enableSecIdent {
+		identityPath = ed2k.EnsureIdentityKeyForSecIdent(&settings)
+	}
+	if identityPath != "" {
+		if err := client.LoadIdentity(identityPath); err != nil {
 			return nil, fmt.Errorf("load identity key: %w", err)
 		}
 	}

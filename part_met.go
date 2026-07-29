@@ -15,12 +15,12 @@ const partMetVersion = 1
 // PartMetDocument 为 <file>.part.met JSON 旁注格式（非 eMule 二进制 .part.met 兼容）。
 // 详见 docs/part-met-format-CN.md。
 type PartMetDocument struct {
-	Format           string                       `json:"format"`
-	Version          int                          `json:"version"`
-	PieceHashes      []protocol.Hash              `json:"piece_hashes,omitempty"`
-	CompletedPieces  []bool                       `json:"completed_pieces,omitempty"`
-	DownloadedBlocks []partMetBlock               `json:"downloaded_blocks,omitempty"`
-	KnownPeers       []string                     `json:"known_peers,omitempty"`
+	Format           string          `json:"format"`
+	Version          int             `json:"version"`
+	PieceHashes      []protocol.Hash `json:"piece_hashes,omitempty"`
+	CompletedPieces  []bool          `json:"completed_pieces,omitempty"`
+	DownloadedBlocks []partMetBlock  `json:"downloaded_blocks,omitempty"`
+	KnownPeers       []string        `json:"known_peers,omitempty"`
 }
 
 type partMetBlock struct {

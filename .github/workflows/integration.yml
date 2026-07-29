@@ -1,0 +1,43 @@
+name: Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_download:
+        description: Run ED2K live download tests
+        type: boolean
+        default: false
+      kadv6_ipv6:
+        description: Run KADV6 IPv6 integration tests
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Unit tests
+        run: go test -race -count=1 ./...
+
+      - name: Live ED2K download tests
+        if: inputs.live_download
+        env:
+          GOED2K_RUN_LIVE_TESTS: '1'
+        run: go test -timeout 15m -run LiveDownload -count=1 .
+
+      - name: KADV6 IPv6 integration
+        if: inputs.kadv6_ipv6
+        env:
+          GOED2K_RUN_KADV6_INTEGRATION: '1'
+        run: go test -timeout 5m -run KADV6PublishSearchPipelineLive -count=1 .

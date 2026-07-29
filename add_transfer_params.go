@@ -13,6 +13,7 @@ type AddTransferParams struct {
 	CreateTime   int64
 	Size         int64
 	FilePath     string
+	FileComment  string
 	Paused       bool
 	ResumeData   *protocol.TransferResumeData
 	Handler      disk.FileHandler

@@ -14,57 +14,58 @@ import (
 )
 
 type incomingConnEntry struct {
-	conn           net.Conn
+	conn            net.Conn
 	forceObfuscated bool
 }
 
 type Session struct {
-	mu                       sync.Mutex
-	diskMu                   sync.Mutex
-	searchMu                 sync.Mutex
-	transfers                map[protocol.Hash]*Transfer
-	connections              []*PeerConnection
-	callbacks                map[int32]protocol.Hash
-	callbackCooldown         map[int32]int64
-	settings                 Settings
-	lastTick                 int64
-	accumulator              Statistics
-	serverConnection         *ServerConnection
-	serverConnections        map[string]*ServerConnection
-	serverConnectionPolicy   map[string]*ServerConnectionPolicy
-	configuredServers        map[string]*net.TCPAddr
-	clientID                 int32
-	tcpFlags                 int32
-	auxPort                  int32
-	diskTasks                []*diskTask
-	diskResults              chan diskTaskResult
-	listener                 *net.TCPListener
-	obfListener              *net.TCPListener
-	incomingConns            chan incomingConnEntry
-	dhtTracker               *DHTTracker
-	dhtv6Tracker             *KADV6Tracker
-	upnp                     *upnpManager
-	uploadQueue              *UploadQueue
-	credits                  *PeerCreditManager
-	friendSlots              map[string]bool
-	downloadLimiter          *downloadRateLimiter
-	activeSearch             *searchTask
-	nextSearchID             uint32
-	lastKadPublishEndpoint      protocol.Endpoint
-	lastKadPeriodicPublishAt    int64
-	lastKadv6PublishTCPAddr     *net.TCPAddr
-	lastKadv6PeriodicPublishAt  int64
-	sharedStore              *SharedStore
-	sharedDirs               []string
-	serverMetMeta     map[string]serverMetEntryMeta
-	globUDPChallenge  map[uint32]globUDPChallengeEntry
-	udpServerStats    map[string]serverUDPStats
-	serverStatUDPConn *net.UDPConn
-	serverStatUDPStop chan struct{}
-	listenPortWasDynamic bool
-	identity          *IdentityState
-	ipFilter          *IPFilter
-	bannedPeers       map[string]protocol.Endpoint
+	mu                         sync.Mutex
+	diskMu                     sync.Mutex
+	searchMu                   sync.Mutex
+	transfers                  map[protocol.Hash]*Transfer
+	connections                []*PeerConnection
+	callbacks                  map[int32]protocol.Hash
+	callbackCooldown           map[int32]int64
+	settings                   Settings
+	lastTick                   int64
+	accumulator                Statistics
+	serverConnection           *ServerConnection
+	serverConnections          map[string]*ServerConnection
+	serverConnectionPolicy     map[string]*ServerConnectionPolicy
+	configuredServers          map[string]*net.TCPAddr
+	clientID                   int32
+	tcpFlags                   int32
+	auxPort                    int32
+	diskTasks                  []*diskTask
+	diskResults                chan diskTaskResult
+	listener                   *net.TCPListener
+	ipv6Listener               *net.TCPListener
+	obfListener                *net.TCPListener
+	incomingConns              chan incomingConnEntry
+	dhtTracker                 *DHTTracker
+	dhtv6Tracker               *KADV6Tracker
+	upnp                       *upnpManager
+	uploadQueue                *UploadQueue
+	credits                    *PeerCreditManager
+	friendSlots                map[string]bool
+	downloadLimiter            *downloadRateLimiter
+	activeSearch               *searchTask
+	nextSearchID               uint32
+	lastKadPublishEndpoint     protocol.Endpoint
+	lastKadPeriodicPublishAt   int64
+	lastKadv6PublishTCPAddr    *net.TCPAddr
+	lastKadv6PeriodicPublishAt int64
+	sharedStore                *SharedStore
+	sharedDirs                 []string
+	serverMetMeta              map[string]serverMetEntryMeta
+	globUDPChallenge           map[uint32]globUDPChallengeEntry
+	udpServerStats             map[string]serverUDPStats
+	serverStatUDPConn          *net.UDPConn
+	serverStatUDPStop          chan struct{}
+	listenPortWasDynamic       bool
+	identity                   *IdentityState
+	ipFilter                   *IPFilter
+	bannedPeers                map[string]protocol.Endpoint
 }
 
 type serverMetEntryMeta struct {
@@ -449,10 +450,38 @@ func (s *Session) Listen() error {
 			}
 		}
 	}(listener)
+	if err := s.listenIPv6Port(port); err != nil {
+		logx.Debug("ipv6 listen unavailable", "port", port, "err", err)
+	}
 	if err := s.listenObfuscationPort(); err != nil {
 		return err
 	}
 	s.startUPnPMapping()
+	return nil
+}
+
+func (s *Session) listenIPv6Port(port int) error {
+	if s.ipv6Listener != nil || port <= 0 {
+		return nil
+	}
+	listener, err := net.ListenTCP("tcp6", &net.TCPAddr{Port: port})
+	if err != nil {
+		return err
+	}
+	s.ipv6Listener = listener
+	go func(l *net.TCPListener) {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			select {
+			case s.incomingConns <- incomingConnEntry{conn: conn}:
+			default:
+				_ = conn.Close()
+			}
+		}
+	}(listener)
 	return nil
 }
 
@@ -499,6 +528,10 @@ func (s *Session) obfuscationListenPortLocked() int {
 
 func (s *Session) CloseListener() {
 	s.stopUPnPMapping()
+	if s.ipv6Listener != nil {
+		_ = s.ipv6Listener.Close()
+		s.ipv6Listener = nil
+	}
 	if s.obfListener != nil {
 		_ = s.obfListener.Close()
 		s.obfListener = nil

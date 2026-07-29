@@ -110,13 +110,13 @@ type kadv6Traversal struct {
 
 func newKADV6Traversal(node *kadv6NodeImpl, target kadv6proto.ID, kind kadv6TraversalKind, size int64, listener func([]kadv6proto.SearchEntry)) *kadv6Traversal {
 	traversal := &kadv6Traversal{
-		node:        node,
-		target:      target,
-		kind:        kind,
-		size:        size,
-		listener:    listener,
-		results:     make([]*kadv6Observer, 0, 16),
-		accum:       make([]kadv6proto.SearchEntry, 0, 16),
+		node:     node,
+		target:   target,
+		kind:     kind,
+		size:     size,
+		listener: listener,
+		results:  make([]*kadv6Observer, 0, 16),
+		accum:    make([]kadv6proto.SearchEntry, 0, 16),
 	}
 	if node != nil && node.tracker != nil && node.tracker.table != nil {
 		traversal.numTargetNodes = node.tracker.table.bucketSize * 2

@@ -20,6 +20,8 @@ const (
 	setupFocusKADNodesDat
 	setupFocusKADNodes
 	setupFocusKADV6
+	setupFocusCryptLayer
+	setupFocusSecIdent
 	setupFocusKADV6NodesDat
 	setupFocusKADV6Nodes
 	setupFocusListenPort
@@ -160,6 +162,14 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableKADV6 = !m.cfg.enableKADV6
 				return m, nil
 			}
+			if m.focus == setupFocusCryptLayer {
+				m.cfg.enableCryptLayer = !m.cfg.enableCryptLayer
+				return m, nil
+			}
+			if m.focus == setupFocusSecIdent {
+				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
+				return m, nil
+			}
 		case "enter":
 			switch m.focus {
 			case setupFocusKAD:
@@ -167,6 +177,15 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case setupFocusUPnP:
 				m.cfg.enableUPnP = !m.cfg.enableUPnP
+				return m, nil
+			case setupFocusKADV6:
+				m.cfg.enableKADV6 = !m.cfg.enableKADV6
+				return m, nil
+			case setupFocusCryptLayer:
+				m.cfg.enableCryptLayer = !m.cfg.enableCryptLayer
+				return m, nil
+			case setupFocusSecIdent:
+				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
 				return m, nil
 			case setupFocusLinkInput:
 				m.addLink()
@@ -227,6 +246,8 @@ func (m setupModel) View() string {
 		m.renderField(setupFocusKADNodesDat, "KAD nodes.dat", m.kadNodesDatInput.View()),
 		m.renderField(setupFocusKADNodes, "KAD bootstrap", m.kadNodesInput.View()),
 		m.renderToggle(setupFocusKADV6, "KADV6", m.cfg.enableKADV6),
+		m.renderToggle(setupFocusCryptLayer, "CryptLayer", m.cfg.enableCryptLayer),
+		m.renderToggle(setupFocusSecIdent, "SecIdent", m.cfg.enableSecIdent),
 		m.renderField(setupFocusKADV6NodesDat, "KADV6 nodes6.dat", m.kadv6NodesDatInput.View()),
 		m.renderField(setupFocusKADV6Nodes, "KADV6 bootstrap", m.kadv6NodesInput.View()),
 		m.renderField(setupFocusListenPort, "Listen port", m.listenPortInput.View()),
@@ -238,7 +259,7 @@ func (m setupModel) View() string {
 		m.renderLinks(),
 		m.renderStart(),
 		"",
-		footerStyle.Render("Tab/Shift+Tab move • Enter add/start • Space toggle KAD/UPNP/KADV6 • d delete link • q quit"),
+		footerStyle.Render("Tab/Shift+Tab move • Enter add/start • Space toggle KAD/UPNP/KADV6/Crypt/SecIdent • d delete link • q quit"),
 	}
 	if strings.TrimSpace(m.status) != "" {
 		lines = append(lines, footerStyle.Render(m.status))
@@ -620,27 +641,28 @@ func (m *newTaskModel) submit() (newTaskModel, tea.Cmd) {
 }
 
 type settingsModel struct {
-	outDirInput        textinput.Model
-	serverInput        textinput.Model
-	serverMetInput     textinput.Model
-	kadNodesDatInput   textinput.Model
-	kadNodesInput      textinput.Model
-	kadv6NodesDatInput textinput.Model
-	kadv6NodesInput    textinput.Model
-	listenPortInput    textinput.Model
-	udpPortInput       textinput.Model
-	udpPortV6Input     textinput.Model
+	outDirInput            textinput.Model
+	serverInput            textinput.Model
+	serverMetInput         textinput.Model
+	kadNodesDatInput       textinput.Model
+	kadNodesInput          textinput.Model
+	kadv6NodesDatInput     textinput.Model
+	kadv6NodesInput        textinput.Model
+	listenPortInput        textinput.Model
+	udpPortInput           textinput.Model
+	udpPortV6Input         textinput.Model
 	peerTimeoutInput       textinput.Model
 	maxDownloadRateKBInput textinput.Model
 	timeoutInput           textinput.Model
 	identityKeyInput       textinput.Model
+	categoriesInput        textinput.Model
 	cfg                    runConfig
 	focus                  int
 	status                 string
 	submitted              bool
 }
 
-const settingsFocusCount = 20
+const settingsFocusCount = 24
 
 func runSettingsTUI(initial runConfig) (runConfig, error) {
 	model := newSettingsModel(initial)
@@ -681,6 +703,7 @@ func newSettingsModel(cfg runConfig) settingsModel {
 	}
 	m.timeoutInput = newSetupInput("0 or 30m", timeoutValue)
 	m.identityKeyInput = newSetupInput("path/to/identity.pem", cfg.identityKeyPath)
+	m.categoriesInput = newSetupInput("name:ext:dir;...", cfg.categoriesConfig)
 	m.syncFocus()
 	return m
 }
@@ -724,8 +747,16 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
 				return m, nil
 			}
+			if m.focus == 20 {
+				m.cfg.enableCryptLayerRequired = !m.cfg.enableCryptLayerRequired
+				return m, nil
+			}
+			if m.focus == 21 {
+				m.cfg.creditsOnlyVerified = !m.cfg.creditsOnlyVerified
+				return m, nil
+			}
 		case "enter":
-			if m.focus == 19 {
+			if m.focus == 23 {
 				next, cmd := m.submit()
 				return next, cmd
 			}
@@ -747,6 +778,14 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == 17 {
 				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
+				return m, nil
+			}
+			if m.focus == 20 {
+				m.cfg.enableCryptLayerRequired = !m.cfg.enableCryptLayerRequired
+				return m, nil
+			}
+			if m.focus == 21 {
+				m.cfg.creditsOnlyVerified = !m.cfg.creditsOnlyVerified
 				return m, nil
 			}
 			m.focus = (m.focus + 1) % settingsFocusCount
@@ -785,6 +824,8 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.timeoutInput, cmd = m.timeoutInput.Update(msg)
 	case 18:
 		m.identityKeyInput, cmd = m.identityKeyInput.Update(msg)
+	case 22:
+		m.categoriesInput, cmd = m.categoriesInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -812,7 +853,10 @@ func (m settingsModel) View() string {
 		m.renderToggle(16, "CryptLayer", m.cfg.enableCryptLayer),
 		m.renderToggle(17, "SecIdent", m.cfg.enableSecIdent),
 		m.renderField(18, "Identity key", m.identityKeyInput.View()),
-		m.renderStart(19, "[ Save settings ]"),
+		m.renderToggle(20, "Crypt req", m.cfg.enableCryptLayerRequired),
+		m.renderToggle(21, "Credits ver", m.cfg.creditsOnlyVerified),
+		m.renderField(22, "Categories", m.categoriesInput.View()),
+		m.renderStart(23, "[ Save settings ]"),
 		"",
 		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP/KADV6/Crypt/SecIdent • Enter save • q quit"),
 	}
@@ -869,6 +913,7 @@ func (m *settingsModel) syncFocus() {
 		&m.maxDownloadRateKBInput,
 		&m.timeoutInput,
 		&m.identityKeyInput,
+		&m.categoriesInput,
 	}
 	for _, input := range inputs {
 		input.Blur()
@@ -902,6 +947,8 @@ func (m *settingsModel) syncFocus() {
 		m.timeoutInput.Focus()
 	case 18:
 		m.identityKeyInput.Focus()
+	case 22:
+		m.categoriesInput.Focus()
 	}
 }
 
@@ -954,6 +1001,7 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 	cfg.maxDownloadRateKB = maxDownloadRateKB
 	cfg.timeout = timeout
 	cfg.identityKeyPath = strings.TrimSpace(m.identityKeyInput.Value())
+	cfg.categoriesConfig = strings.TrimSpace(m.categoriesInput.Value())
 	m.cfg = cfg
 	m.submitted = true
 	return *m, tea.Quit

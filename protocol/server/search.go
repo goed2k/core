@@ -238,8 +238,8 @@ type searchTerm interface {
 }
 
 type searchStringTerm struct {
-	value string
-	tagID byte
+	value  string
+	tagID  byte
 	tagged bool
 }
 

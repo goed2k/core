@@ -15,12 +15,12 @@ type KADV6Status struct {
 }
 
 type ClientDHTv6State struct {
-	SelfID        protocol.Hash         `json:"self_id,omitempty"`
-	LastBootstrap int64                 `json:"last_bootstrap,omitempty"`
-	LastRefresh   int64                 `json:"last_refresh,omitempty"`
-	StoragePoint  string                `json:"storage_point,omitempty"`
+	SelfID        protocol.Hash          `json:"self_id,omitempty"`
+	LastBootstrap int64                  `json:"last_bootstrap,omitempty"`
+	LastRefresh   int64                  `json:"last_refresh,omitempty"`
+	StoragePoint  string                 `json:"storage_point,omitempty"`
 	Nodes         []ClientDHTv6NodeState `json:"nodes,omitempty"`
-	RouterNodes   []string              `json:"router_nodes,omitempty"`
+	RouterNodes   []string               `json:"router_nodes,omitempty"`
 }
 
 type ClientDHTv6NodeState struct {

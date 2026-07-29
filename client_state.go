@@ -13,7 +13,13 @@ import (
 	"github.com/goed2k/core/protocol"
 )
 
-const clientStateVersion = 6
+const clientStateVersion = 7
+
+type ClientCategoryState struct {
+	Name          string `json:"name"`
+	OutputDir     string `json:"output_dir"`
+	AutoExtension string `json:"auto_extension"`
+}
 
 type ClientStateStore interface {
 	Load() (*ClientState, error)
@@ -21,18 +27,19 @@ type ClientStateStore interface {
 }
 
 type ClientState struct {
-	Version           int                   `json:"version"`
-	ServerAddress     string                `json:"server_address,omitempty"`
-	IdentityVersion   int                   `json:"identity_version,omitempty"`
-	IdentityKeyPath   string                `json:"identity_key_path,omitempty"`
-	Transfers         []ClientTransferState `json:"transfers"`
-	Credits       []ClientCreditState   `json:"credits,omitempty"`
-	FriendSlots   []protocol.Hash       `json:"friend_slots,omitempty"`
-	DHT           *ClientDHTState       `json:"dht,omitempty"`
-	DHTv6         *ClientDHTv6State     `json:"dhtv6,omitempty"`
-	SharedDirs    []string              `json:"shared_dirs,omitempty"`
-	SharedFiles   []ClientSharedFileState `json:"shared_files,omitempty"`
-	BannedPeers   []protocol.Endpoint   `json:"banned_peers,omitempty"`
+	Version         int                     `json:"version"`
+	ServerAddress   string                  `json:"server_address,omitempty"`
+	IdentityVersion int                     `json:"identity_version,omitempty"`
+	IdentityKeyPath string                  `json:"identity_key_path,omitempty"`
+	Transfers       []ClientTransferState   `json:"transfers"`
+	Credits         []ClientCreditState     `json:"credits,omitempty"`
+	FriendSlots     []protocol.Hash         `json:"friend_slots,omitempty"`
+	DHT             *ClientDHTState         `json:"dht,omitempty"`
+	DHTv6           *ClientDHTv6State       `json:"dhtv6,omitempty"`
+	SharedDirs      []string                `json:"shared_dirs,omitempty"`
+	SharedFiles     []ClientSharedFileState `json:"shared_files,omitempty"`
+	BannedPeers     []protocol.Endpoint     `json:"banned_peers,omitempty"`
+	Categories      []ClientCategoryState   `json:"categories,omitempty"`
 }
 
 // ClientSharedFileState 持久化的共享文件元数据。
@@ -48,14 +55,14 @@ type ClientSharedFileState struct {
 }
 
 type ClientTransferState struct {
-	Hash       protocol.Hash                `json:"hash"`
-	Size       int64                        `json:"size"`
-	CreateTime int64                        `json:"create_time"`
-	TargetPath string                       `json:"target_path"`
-	Paused         bool                         `json:"paused"`
-	UploadPrio     UploadPriority               `json:"upload_prio,omitempty"`
-	DownloadPrio   TransferPriority             `json:"download_prio,omitempty"`
-	ResumeData     *protocol.TransferResumeData `json:"resume_data,omitempty"`
+	Hash         protocol.Hash                `json:"hash"`
+	Size         int64                        `json:"size"`
+	CreateTime   int64                        `json:"create_time"`
+	TargetPath   string                       `json:"target_path"`
+	Paused       bool                         `json:"paused"`
+	UploadPrio   UploadPriority               `json:"upload_prio,omitempty"`
+	DownloadPrio TransferPriority             `json:"download_prio,omitempty"`
+	ResumeData   *protocol.TransferResumeData `json:"resume_data,omitempty"`
 }
 
 type ClientDHTState struct {
@@ -213,6 +220,16 @@ func (c *Client) snapshotState() (*ClientState, error) {
 		FriendSlots:     c.session.friendSlotSnapshot(),
 		BannedPeers:     c.session.snapshotBannedPeers(),
 	}
+	if len(c.session.settings.Categories) > 0 {
+		state.Categories = make([]ClientCategoryState, 0, len(c.session.settings.Categories))
+		for _, cat := range c.session.settings.Categories {
+			state.Categories = append(state.Categories, ClientCategoryState{
+				Name:          cat.Name,
+				OutputDir:     cat.OutputDir,
+				AutoExtension: cat.AutoExtension,
+			})
+		}
+	}
 	if id := c.session.Identity(); id != nil {
 		state.IdentityVersion = id.Version
 		if id.KeyPath() != "" {
@@ -250,14 +267,14 @@ func (c *Client) snapshotState() (*ClientState, error) {
 			continue
 		}
 		state.Transfers = append(state.Transfers, ClientTransferState{
-			Hash:       handle.GetHash(),
-			Size:       handle.GetSize(),
-			CreateTime: handle.GetCreateTime(),
-			TargetPath: path,
-			Paused:         handle.IsPaused(),
-			UploadPrio:     handle.transfer.UploadPriority(),
-			DownloadPrio:   handle.transfer.DownloadPriority(),
-			ResumeData:     handle.GetResumeData(),
+			Hash:         handle.GetHash(),
+			Size:         handle.GetSize(),
+			CreateTime:   handle.GetCreateTime(),
+			TargetPath:   path,
+			Paused:       handle.IsPaused(),
+			UploadPrio:   handle.transfer.UploadPriority(),
+			DownloadPrio: handle.transfer.DownloadPriority(),
+			ResumeData:   handle.GetResumeData(),
 		})
 	}
 	return state, nil
@@ -280,6 +297,17 @@ func (c *Client) applyState(state *ClientState) error {
 		if id := c.session.Identity(); id != nil {
 			id.Version = state.IdentityVersion
 		}
+	}
+	if len(state.Categories) > 0 {
+		cats := make([]Category, 0, len(state.Categories))
+		for _, rec := range state.Categories {
+			cats = append(cats, Category{
+				Name:          rec.Name,
+				OutputDir:     rec.OutputDir,
+				AutoExtension: rec.AutoExtension,
+			})
+		}
+		c.session.settings.Categories = cats
 	}
 	c.session.Credits().ApplySnapshot(state.Credits)
 	c.session.applyFriendSlotSnapshot(state.FriendSlots)
