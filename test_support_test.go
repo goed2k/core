@@ -8,6 +8,7 @@ import (
 
 // skipUnlessLiveNetwork 跳过依赖外网 ED2K 服务器的联调测试。
 // 本地或 CI 默认不运行；需显式设置 GOED2K_RUN_LIVE_TESTS=1。
+// KADV6 IPv6 联调见 session_kadv6_integration_test.go（GOED2K_RUN_KADV6_INTEGRATION=1）。
 func skipUnlessLiveNetwork(t *testing.T) {
 	t.Helper()
 	if testing.Short() {

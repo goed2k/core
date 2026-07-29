@@ -115,11 +115,42 @@
 
 ---
 
-## 阶段 9：Secure Ident 预研（未完整实现）
+## 阶段 9：Secure Ident
 
-**目标**：记录与 eMule **SecIdent** 对齐所需的差距与建议步骤（密钥、验签、与 Credits 的关系等）。
+**目标**：实现 eMule **SecIdent** 密钥、握手、验签与 Credits 关联。
+
+**要点**：
+
+- `secure_ident.go`：RSA 密钥生成/加载、签名与验签。
+- `peer_connection.go`：Hello 扩展 SecIdent 载荷交换。
+- `client_state.go`：`IdentityKeyPath` 持久化，`applyState` 时 `LoadIdentity` 恢复密钥。
+- `cmd/goed2k`：`--sec-ident`、`--identity-key`；设置页可配置。
 
 **说明**：见 [secure-ident-plan.md](secure-ident-plan.md)。
+
+---
+
+## 阶段 10：KADV6 发布与下载管线
+
+**目标**：IPv6 DHT 搜源、完成发布与 Policy 合并。
+
+**要点**：
+
+- `session_kadv6.go`：搜源结果并入 Transfer。
+- `session_kadv6_publish.go`：IPv6 TCP 端点发布、周期刷新。
+- `peer_kadv6.go`：`DialAddr` 优先 IPv6 拨号。
+- 测试：`session_kadv6_test.go`、`session_kadv6_publish_test.go`、`session_kadv6_integration_test.go`。
+
+---
+
+## 阶段 11：CI 持续集成
+
+**目标**：push/PR 自动回归，防止破坏兼容性。
+
+**要点**：
+
+- `.github/workflows/ci.yml`：`go vet`、`-race` 测试、构建。
+- `test_support_test.go`：外网/IPv6 联调默认跳过（`GOED2K_RUN_LIVE_TESTS` / `GOED2K_RUN_KADV6_INTEGRATION`）。
 
 ---
 
@@ -137,6 +168,8 @@
 | 共享库 | `shared_store.go`、`shared_file.go`、`session_shared.go` |
 | Server 发布 | `shared_publish.go`、`session.go`（`OnServerIDChange`、`PublishTransferToServer`） |
 | Kad 发布 | `session_kad_publish.go` |
+| KADV6 发布 | `session_kadv6_publish.go` |
+| Secure Ident | `secure_ident.go`、`client_state.go` |
 | 客户端状态 | `client_state.go`、`client.go` |
 | TUI | `cmd/goed2k/tui.go` |
 | 来源交换 | `protocol/client/source_exchange.go`、`peer_connection.go`、`policy.go` |

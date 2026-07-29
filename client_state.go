@@ -3,6 +3,7 @@ package goed2k
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -272,8 +273,10 @@ func (c *Client) applyState(state *ClientState) error {
 	c.serverAddr = state.ServerAddress
 	if state.IdentityKeyPath != "" {
 		c.session.settings.IdentityKeyPath = state.IdentityKeyPath
-	}
-	if state.IdentityVersion != 0 {
+		if err := c.session.LoadIdentity(state.IdentityKeyPath); err != nil {
+			return fmt.Errorf("load identity from %q: %w", state.IdentityKeyPath, err)
+		}
+	} else if state.IdentityVersion != 0 {
 		if id := c.session.Identity(); id != nil {
 			id.Version = state.IdentityVersion
 		}

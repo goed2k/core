@@ -20,20 +20,23 @@ const (
 )
 
 type runConfig struct {
-	links          []string
-	outDir         string
-	serverAddr     string
-	serverMetPath  string
-	listenPort     int
-	udpPort        int
-	udpPortV6      int
-	enableKAD      bool
-	enableKADV6    bool
-	enableUPnP     bool
-	kadNodesDat    string
-	kadNodes       string
-	kadv6NodesDat  string
-	kadv6Nodes     string
+	links             []string
+	outDir            string
+	serverAddr        string
+	serverMetPath     string
+	listenPort        int
+	udpPort           int
+	udpPortV6         int
+	enableKAD         bool
+	enableKADV6       bool
+	enableUPnP        bool
+	enableCryptLayer  bool
+	enableSecIdent    bool
+	identityKeyPath   string
+	kadNodesDat       string
+	kadNodes          string
+	kadv6NodesDat     string
+	kadv6Nodes        string
 	peerTimeout       int
 	maxDownloadRateKB int
 	timeout           time.Duration
@@ -51,6 +54,9 @@ type appContext struct {
 func main() {
 	cfg := defaultRunConfig()
 	flag.BoolVar(&cfg.enableKADV6, "kadv6", cfg.enableKADV6, "enable KADV6 IPv6 DHT")
+	flag.BoolVar(&cfg.enableCryptLayer, "crypt-layer", cfg.enableCryptLayer, "enable TCP protocol obfuscation (CryptLayer)")
+	flag.BoolVar(&cfg.enableSecIdent, "sec-ident", cfg.enableSecIdent, "enable Secure Ident handshake")
+	flag.StringVar(&cfg.identityKeyPath, "identity-key", cfg.identityKeyPath, "path to RSA identity private key PEM for Secure Ident")
 	flag.IntVar(&cfg.udpPortV6, "udp-port-v6", cfg.udpPortV6, "KADV6 UDP listen port")
 	flag.StringVar(&cfg.kadv6NodesDat, "kadv6-nodes-dat", cfg.kadv6NodesDat, "KADV6 nodes6.dat path or URL")
 	flag.StringVar(&cfg.kadv6Nodes, "kadv6-bootstrap", cfg.kadv6Nodes, "KADV6 bootstrap nodes")
@@ -114,6 +120,9 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	settings.EnableDHT = cfg.enableKAD
 	settings.EnableDHTv6 = cfg.enableKADV6
 	settings.EnableUPnP = cfg.enableUPnP
+	settings.EnableCryptLayer = cfg.enableCryptLayer
+	settings.EnableSecIdent = cfg.enableSecIdent
+	settings.IdentityKeyPath = cfg.identityKeyPath
 	settings.PeerConnectionTimeout = cfg.peerTimeout
 	settings.MaxDownloadRateKB = cfg.maxDownloadRateKB
 
@@ -123,6 +132,11 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	}
 	if cfg.enableKADV6 {
 		client.EnableDHTv6()
+	}
+	if cfg.identityKeyPath != "" {
+		if err := client.LoadIdentity(cfg.identityKeyPath); err != nil {
+			return nil, fmt.Errorf("load identity key: %w", err)
+		}
 	}
 	if err := client.Start(); err != nil {
 		return nil, fmt.Errorf("listen failed on port %d: %w", settings.ListenPort, err)

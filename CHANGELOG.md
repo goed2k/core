@@ -10,6 +10,11 @@
 
 - GitHub Actions CI：push/PR 自动运行 `go vet`、`-race` 单元测试与构建
 - 外网联调测试默认跳过（`GOED2K_RUN_LIVE_TESTS=1` 手动启用）
+- KADV6 IPv6 联调测试（`GOED2K_RUN_KADV6_INTEGRATION=1` 手动启用）
+- `applyState` 恢复 Secure Ident 密钥（`LoadIdentity`）
+- KAD 发布单测（`session_kad_publish_test.go`）
+- CLI/TUI：`--crypt-layer`、`--sec-ident`、`--identity-key`
+- `Client.LoadIdentity` 公开 API
 
 ## [0.1.0] - 2026-07-29
 

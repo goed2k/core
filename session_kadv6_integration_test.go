@@ -1,0 +1,115 @@
+package goed2k
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+)
+func skipUnlessIPv6Network(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("跳过：短测试模式不运行 IPv6 联调")
+	}
+	if os.Getenv("GOED2K_RUN_KADV6_INTEGRATION") != "1" {
+		t.Skip("跳过：KADV6 联调测试需设置 GOED2K_RUN_KADV6_INTEGRATION=1")
+	}
+	if localOutboundIPv6() == nil {
+		t.Skip("跳过：本机无可用 IPv6 出站地址")
+	}
+}
+
+// TestKADV6PublishSearchMergePipeline 验证发布 → 本地索引 → 并入 Policy 的闭环（不依赖外网）。
+func TestKADV6PublishSearchMergePipeline(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	session.settings.EnableDHTv6 = true
+	transfer.state = Finished
+
+	tracker := NewKADV6Tracker(0, 0)
+	seed := mustUDPAddrV6(t, "[2001:db8::1]:4672")
+	tracker.AddNode(seed)
+	session.dhtv6Tracker = tracker
+
+	tcpAddr := &net.TCPAddr{IP: net.ParseIP("2001:db8::42"), Port: 4661}
+	session.publishSingleTransferKADV6(tracker, tcpAddr, transfer)
+
+	entries := tracker.searchEntriesLocked(transfer.hash)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 published source, got %d", len(entries))
+	}
+	got, ok := entries[0].SourceAddr()
+	if !ok || got.String() != "[2001:db8::42]:4661" {
+		t.Fatalf("unexpected published source %v ok=%v", got, ok)
+	}
+
+	session.mergeKADV6SearchResults(transfer.hash, transfer, entries)
+	if transfer.policy.Size() == 0 {
+		t.Fatal("expected peer merged into transfer policy")
+	}
+	peer, ok := PeerFromKADV6SearchEntry(entries[0], int(PeerKADV6))
+	if !ok || peer.DialAddr == nil {
+		t.Fatal("expected IPv6 dial peer from search entry")
+	}
+}
+
+// TestKADV6PublishSearchPipelineLive 在具备 IPv6 的环境验证发布端点与本机索引。
+func TestKADV6PublishSearchPipelineLive(t *testing.T) {
+	skipUnlessIPv6Network(t)
+
+	session, transfer := newTestTransfer(t)
+	session.settings.EnableDHTv6 = true
+	transfer.state = Finished
+
+	tracker := NewKADV6Tracker(0, 0)
+	seed := mustUDPAddrV6(t, "[2001:db8::1]:4672")
+	tracker.AddNode(seed)
+	session.dhtv6Tracker = tracker
+
+	tcpAddr := session.kadv6PublishEndpoint()
+	if tcpAddr == nil {
+		t.Fatal("expected IPv6 publish endpoint on IPv6-capable host")
+	}
+
+	session.PublishTransferToKADV6(transfer)
+
+	entries := tracker.searchEntriesLocked(transfer.hash)
+	if len(entries) == 0 {
+		t.Fatal("expected published source in local index after PublishTransferToKADV6")
+	}
+	got, ok := entries[0].SourceAddr()
+	if !ok || got.Port != tcpAddr.Port {
+		t.Fatalf("unexpected published source %v ok=%v want port %d", got, ok, tcpAddr.Port)
+	}
+}
+
+func TestClientLoadStateRestoresIdentityKeyFromStateFile(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "identity.pem")
+	if _, err := GenerateIdentityKeyPair(keyPath); err != nil {
+		t.Fatalf("generate identity: %v", err)
+	}
+
+	statePath := filepath.Join(dir, "state.json")
+	client := NewClient(NewSettings())
+	client.SetStatePath(statePath)
+	if err := client.Session().LoadIdentity(keyPath); err != nil {
+		t.Fatalf("load identity: %v", err)
+	}
+	if err := client.SaveState(statePath); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	restored := NewClient(NewSettings())
+	if err := restored.LoadState(statePath); err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	id := restored.Session().Identity()
+	if id == nil || !id.Available() {
+		t.Fatal("expected restored identity to be available")
+	}
+	if id.KeyPath() != keyPath {
+		t.Fatalf("expected key path %q, got %q", keyPath, id.KeyPath())
+	}
+}
+
+// skipUnlessIPv6Network 跳过需要本机 IPv6 出站能力的联调测试。
