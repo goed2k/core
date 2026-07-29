@@ -172,11 +172,11 @@ func newTransferTable() table.Model {
 func newSearchTable() table.Model {
 	columns := []table.Column{
 		{Title: "#", Width: 4},
-		{Title: "Name", Width: 34},
+		{Title: "Name", Width: 28},
 		{Title: "Size", Width: 10},
-		{Title: "Src", Width: 10},
+		{Title: "Src", Width: 8},
 		{Title: "Sources", Width: 8},
-		{Title: "Complete", Width: 8},
+		{Title: "Note", Width: 18},
 	}
 	t := table.New(
 		table.WithColumns(columns),
@@ -449,6 +449,9 @@ func (m tuiModel) renderSearchPage() string {
 	}
 	if result := m.selectedSearchResult(); result != nil {
 		info = append(info, fmt.Sprintf("selected=%s", emptyFallback(result.FileName, result.Hash.String())))
+		if strings.TrimSpace(result.Note) != "" {
+			info = append(info, "note="+trimString(result.Note, maxInt(24, m.width-16)))
+		}
 		if link := result.ED2KLink(); link != "" {
 			info = append(info, "ed2k="+trimString(link, maxInt(24, m.width-16)))
 		}
@@ -598,11 +601,11 @@ func (m *tuiModel) syncSearchResults() {
 	for i, result := range m.search.Results {
 		rows = append(rows, table.Row{
 			fmt.Sprintf("%d", i+1),
-			trimString(emptyFallback(result.FileName, result.Hash.String()), 34),
+			trimString(emptyFallback(result.FileName, result.Hash.String()), 28),
 			humanSize(result.FileSize),
 			searchResultSourceLabel(result.Source),
 			fmt.Sprintf("%d", result.Sources),
-			fmt.Sprintf("%d", result.CompleteSources),
+			trimString(result.Note, 18),
 		})
 	}
 	m.searchTable.SetRows(rows)

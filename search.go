@@ -57,6 +57,7 @@ type SearchResult struct {
 	MediaCodec      string
 	Extension       string
 	FileType        string
+	Note            string
 	Source          SearchResultSource
 }
 
@@ -264,6 +265,9 @@ func (s *searchTask) mergeResult(result SearchResult) {
 		if existing.FileType == "" {
 			existing.FileType = result.FileType
 		}
+		if existing.Note == "" {
+			existing.Note = result.Note
+		}
 		existing.Source |= result.Source
 		s.results[key] = existing
 	} else {
@@ -345,7 +349,20 @@ func makeSearchResultFromKAD(entry kadproto.SearchEntry) SearchResult {
 	if fileType, ok := entry.StringTag(protocol.FTFileType); ok {
 		result.FileType = fileType
 	}
+	result.Note = kadSearchNote(entry)
 	return result
+}
+
+const kadTagDescription byte = 0x0B
+
+func kadSearchNote(entry kadproto.SearchEntry) string {
+	if note, ok := entry.StringTag(kadTagDescription); ok && strings.TrimSpace(note) != "" {
+		return note
+	}
+	if note, ok := entry.StringTag(protocol.FTFileComment); ok && strings.TrimSpace(note) != "" {
+		return note
+	}
+	return ""
 }
 
 func normalizeSearchParams(params SearchParams) SearchParams {

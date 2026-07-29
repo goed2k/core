@@ -174,6 +174,8 @@ type PeerConnection struct {
 	remoteSecIdentVer int
 	remoteKeyFP        uint32
 	helloInfoFlags     byte
+	remoteFileRating   byte
+	remoteFileComment  string
 }
 
 func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Transfer, peerInfo *Peer) *PeerConnection {
@@ -1238,6 +1240,8 @@ func (p *PeerConnection) ProcessIncoming() error {
 		case *clientproto.QueueRanking:
 			debugPeerf("peer %s <- QueueRanking", p.endpoint.String())
 			p.Close(QueueRanking)
+		case *clientproto.FileComment:
+			p.HandleFileComment(value)
 		case *clientproto.SendingPart32:
 			debugPeerf("peer %s <- SendingPart32 %d..%d", p.endpoint.String(), value.BeginOffset, value.EndOffset)
 			if req, err := data.MakePeerRequest(int64(value.BeginOffset), int64(value.EndOffset)); err == nil {
@@ -1674,6 +1678,18 @@ func (p *PeerConnection) SendRequestSources2(hash protocol.Hash) error {
 	debugPeerf("peer %s -> RequestSources2", p.endpoint.String())
 	p.QueuePacket(raw)
 	return nil
+}
+
+func (p *PeerConnection) HandleFileComment(value *clientproto.FileComment) {
+	if value == nil || p.remotePeerInfo.Misc1.AcceptCommentVer == 0 {
+		return
+	}
+	comment := string(value.Comment)
+	if len(comment) > clientproto.MaxFileCommentLen {
+		comment = comment[:clientproto.MaxFileCommentLen]
+	}
+	p.remoteFileRating = value.Rating
+	p.remoteFileComment = comment
 }
 
 func (p *PeerConnection) HandleRequestSources2(req *clientproto.RequestSources2) {

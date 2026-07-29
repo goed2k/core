@@ -603,6 +603,22 @@ func (t *DHTTracker) SearchKeywords(hash protocol.Hash, cb func([]kadproto.Searc
 	return t.node.searchKeywords(hash, cb)
 }
 
+func (t *DHTTracker) SearchNotes(hash protocol.Hash, cb func([]kadproto.SearchEntry)) bool {
+	if cb == nil {
+		return false
+	}
+	if err := t.Start(); err != nil {
+		return false
+	}
+	t.mu.Lock()
+	if len(t.nodes) == 0 && len(t.table.RouterNodes()) == 0 {
+		t.mu.Unlock()
+		return false
+	}
+	t.mu.Unlock()
+	return t.node.searchNotes(hash, cb)
+}
+
 func (t *DHTTracker) SetStoragePoint(addr *net.UDPAddr) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

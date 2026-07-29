@@ -7,6 +7,7 @@ const (
 	opEmuleInfo         byte = 0x01
 	opEmuleInfoAnswer   byte = 0x02
 	opQueueRanking      byte = 0x60
+	opFileComment       byte = 0x61
 	opHelloAnswer       byte = 0x4C
 	opSetReqFileID      byte = 0x4F
 	opFileStatus        byte = 0x50
@@ -68,6 +69,7 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opCancelTransfer), "client.CancelTransfer", func() protocol.Serializable { return &CancelTransfer{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opOutOfPartReqs), "client.OutOfParts", func() protocol.Serializable { return &OutOfParts{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opQueueRanking), "client.QueueRanking", func() protocol.Serializable { return &QueueRanking{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opFileComment), "client.FileComment", func() protocol.Serializable { return &FileComment{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opRequestParts32), "client.RequestParts32", func() protocol.Serializable { return &RequestParts32{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opRequestParts64), "client.RequestParts64", func() protocol.Serializable { return &RequestParts64{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opSendingPart32), "client.SendingPart32", func() protocol.Serializable { return &SendingPart32{} })

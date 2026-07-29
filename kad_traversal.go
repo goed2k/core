@@ -253,7 +253,7 @@ func (t *kadTraversal) invoke(o *kadObserver) bool {
 			Target:     t.target,
 			Receiver:   o.id,
 		}, o.endpoint, o, kadproto.ResOp, &t.target.Hash, false)
-	case kadTraversalFindKeywords:
+	case kadTraversalFindKeywords, kadTraversalFindNotes:
 		searchType := kadproto.FindValue
 		return t.node.invoke(kadproto.Req{
 			SearchType: searchType,

@@ -113,6 +113,17 @@ func (n *kadNodeImpl) searchKeywords(hash protocol.Hash, cb func([]kadproto.Sear
 	return t.start()
 }
 
+func (n *kadNodeImpl) searchNotes(hash protocol.Hash, cb func([]kadproto.SearchEntry)) bool {
+	if n == nil || n.tracker == nil || cb == nil {
+		return false
+	}
+	t := newKadTraversal(n, kadproto.NewID(hash), kadTraversalFindNotes, 0, cb)
+	for _, node := range n.tracker.closestNodesLocked(kadproto.NewID(hash), 50, true) {
+		t.addNode(node.Addr, node.ID, node.TCPPort, node.Version)
+	}
+	return t.start()
+}
+
 func (n *kadNodeImpl) refresh(target kadproto.ID) bool {
 	t := newKadTraversal(n, target, kadTraversalRefresh, 0, nil)
 	for _, node := range n.tracker.closestNodesLocked(target, 50, true) {
