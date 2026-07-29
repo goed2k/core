@@ -44,6 +44,7 @@ func TestClientAddLinkSupportsPerTransferOutputDir(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	dirA := filepath.Join(t.TempDir(), "a")
 	dirB := filepath.Join(t.TempDir(), "b")
@@ -75,6 +76,7 @@ func TestClientPauseResumeAndRemoveTransfer(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	handle, _, err := client.AddLink("ed2k://|file|song.mp3|2048|31D6CFE0D10EE931B73C59D7E0C06FC0|/", t.TempDir())
 	if err != nil {
@@ -108,6 +110,7 @@ func TestClientPauseTransferDisconnectsActivePeers(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	handle, _, err := client.AddLink("ed2k://|file|pause.bin|2048|31D6CFE0D10EE931B73C59D7E0C06FC0|/", t.TempDir())
 	if err != nil {
@@ -176,6 +179,7 @@ func TestClientSaveAndLoadStateRestoresProgress(t *testing.T) {
 	outputDir := filepath.Join(t.TempDir(), "downloads")
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	client.SetStatePath(statePath)
 	client.serverAddr = "176.123.5.89:4725"
 
@@ -183,7 +187,6 @@ func TestClientSaveAndLoadStateRestoresProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add link: %v", err)
 	}
-	registerTransferFileCleanup(t, handle)
 	block := data.NewPieceBlock(0, 0)
 	if _, err := handle.transfer.pm.WriteBlock(block, make([]byte, BlockSize)); err != nil {
 		t.Fatalf("seed block data: %v", err)
@@ -203,6 +206,7 @@ func TestClientSaveAndLoadStateRestoresProgress(t *testing.T) {
 	}
 
 	restored := NewClient(settings)
+	registerClientTransferFileCleanup(t, restored)
 	if err := restored.LoadState(statePath); err != nil {
 		t.Fatalf("load state: %v", err)
 	}
@@ -210,7 +214,6 @@ func TestClientSaveAndLoadStateRestoresProgress(t *testing.T) {
 	if !restoredHandle.IsValid() {
 		t.Fatal("expected restored transfer handle to be valid")
 	}
-	registerTransferFileCleanup(t, restoredHandle)
 	if restoredHandle.GetFilePath() != targetPath {
 		t.Fatalf("unexpected restored path: %s", restoredHandle.GetFilePath())
 	}
@@ -245,6 +248,7 @@ func TestClientSupportsCustomStateStore(t *testing.T) {
 
 	store := &memoryClientStateStore{}
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	client.SetStateStore(store)
 	client.serverAddr = "176.123.5.89:4725"
 
@@ -261,6 +265,7 @@ func TestClientSupportsCustomStateStore(t *testing.T) {
 	}
 
 	restored := NewClient(settings)
+	registerClientTransferFileCleanup(t, restored)
 	restored.SetStateStore(store)
 	if err := restored.LoadState(""); err != nil {
 		t.Fatalf("load state with custom store: %v", err)
@@ -285,6 +290,7 @@ func TestClientAddLinkRequestsSourcesImmediatelyWhenServerReady(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	serverAddr := &net.TCPAddr{IP: net.IPv4(45, 82, 80, 155), Port: 5687}
 	serverConn := NewServerConnection("test", serverAddr, client.session)
@@ -308,6 +314,7 @@ func TestClientSubscribeStatusReceivesSnapshots(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	events, cancel := client.SubscribeStatus()
 	defer cancel()
@@ -349,6 +356,7 @@ func TestClientSubscribeTransferProgressReceivesStateChanges(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	events, cancel := client.SubscribeTransferProgress()
 	defer cancel()
@@ -407,6 +415,7 @@ func TestClientStatusIncludesServersPeersAndTransfers(t *testing.T) {
 	settings.ListenPort = 0
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	handle, filePath, err := client.AddLink("ed2k://|file|status.bin|1945600|31D6CFE0D14CE931B73C59D7E0C04BC0|/", t.TempDir())
 	if err != nil {
 		t.Fatalf("add link: %v", err)
@@ -511,6 +520,7 @@ func TestClientStatusIncludesDownloadingPieceSnapshots(t *testing.T) {
 	settings.ListenPort = 0
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	handle, _, err := client.AddLink("ed2k://|file|piece.bin|19456000|31D6CFE0D14CE931B73C59D7E0C04BC0|/", t.TempDir())
 	if err != nil {
 		t.Fatalf("add link: %v", err)
@@ -610,6 +620,7 @@ func TestOnBlockWriteCompletedQueuesPieceHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add transfer: %v", err)
 	}
+	registerTransferFileCleanup(t, handle)
 
 	block := data.NewPieceBlock(0, 0)
 	handle.transfer.picker.WeHaveBlock(block)
@@ -629,6 +640,7 @@ func TestClientSaveAndLoadStateRestoresUploadSettings(t *testing.T) {
 
 	store := &memoryClientStateStore{}
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	client.SetStateStore(store)
 
 	handle, _, err := client.AddLink("ed2k://|file|upload.bin|2048|31D6CFE0D14CE931B73C59D7E0C04BC0|/", t.TempDir())
@@ -644,6 +656,7 @@ func TestClientSaveAndLoadStateRestoresUploadSettings(t *testing.T) {
 	}
 
 	restored := NewClient(settings)
+	registerClientTransferFileCleanup(t, restored)
 	restored.SetStateStore(store)
 	if err := restored.LoadState(""); err != nil {
 		t.Fatalf("load state: %v", err)
@@ -664,6 +677,7 @@ func TestClientWaitReturnsWhenStopped(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	if _, _, err := client.AddLink("ed2k://|file|wait.bin|2048|31D6CFE0D14CE931B73C59D7E0C04BC0|/", t.TempDir()); err != nil {
 		t.Fatalf("add link: %v", err)
@@ -700,6 +714,7 @@ func TestClientStartAutoAssignsTCPAndUDPPorts(t *testing.T) {
 	settings.EnableDHT = true
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	if err := client.Start(); err != nil {
 		t.Fatalf("start client: %v", err)
 	}
@@ -748,6 +763,7 @@ func TestClientEnableDHTLoadsNodesDat(t *testing.T) {
 	}
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	baseNodes := len(client.EnableDHT().nodes)
 	if err := client.LoadDHTNodesDat(nodesDatPath); err != nil {
 		t.Fatalf("load nodes.dat: %v", err)
@@ -826,6 +842,7 @@ func TestClientLoadDHTNodesDatSupportsHTTPFileAndMultipleSources(t *testing.T) {
 	defer httpSrv.Close()
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	baseNodes := len(client.EnableDHT().nodes)
 	if err := client.LoadDHTNodesDat(pathA, fileURLFromPath(pathB), httpSrv.URL); err != nil {
 		t.Fatalf("load multiple nodes.dat sources: %v", err)
@@ -891,6 +908,7 @@ func TestClientLoadDHTNodesDatIgnoresFailedSourceWhenAnotherSucceeds(t *testing.
 	}
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	baseNodes := len(client.EnableDHT().nodes)
 	if err := client.LoadDHTNodesDat(filepath.Join(t.TempDir(), "missing.nodes.dat"), goodPath); err != nil {
 		t.Fatalf("expected partial success, got error: %v", err)
@@ -949,6 +967,7 @@ func TestClientLoadBootstrapNodesDatUsesRouterNodes(t *testing.T) {
 	}
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	baseRouterNodes := len(client.EnableDHT().table.RouterNodes())
 	if err := client.LoadDHTNodesDat(path); err != nil {
 		t.Fatalf("load bootstrap nodes.dat: %v", err)
@@ -966,6 +985,7 @@ func TestClientLoadServerMetParsesFixture(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	path := jed2kServerMetFixturePath(t)
 	entries, err := client.LoadServerMet(path)
@@ -991,6 +1011,7 @@ func TestClientLoadServerMetParsesServerListED2KLink(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	fixturePath := jed2kServerMetFixturePath(t)
 	payload, err := os.ReadFile(fixturePath)
@@ -1016,6 +1037,7 @@ func TestClientConnectServerLinkTracksConfiguredServer(t *testing.T) {
 	settings := NewSettings()
 	settings.ListenPort = 0
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1045,6 +1067,7 @@ func TestClientAddDHTBootstrapNodesParsesCommaSeparated(t *testing.T) {
 	settings.UDPPort = 0
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	baseNodes := len(client.EnableDHT().nodes)
 	if err := client.AddDHTBootstrapNodes("1.2.3.4:4665, 5.6.7.8:5678"); err != nil {
 		t.Fatalf("add DHT bootstrap nodes: %v", err)
@@ -1065,6 +1088,7 @@ func TestClientDHTStatusReflectsTrackerState(t *testing.T) {
 	settings.UDPPort = 0
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	tracker := client.EnableDHT()
 	addr, err := net.ResolveUDPAddr("udp", "1.2.3.4:4665")
 	if err != nil {
@@ -1091,6 +1115,7 @@ func TestClientSaveAndLoadStateRestoresDHTState(t *testing.T) {
 
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	client.SetStatePath(statePath)
 	tracker := client.EnableDHT()
 	addr, err := net.ResolveUDPAddr("udp", "1.2.3.4:4672")
@@ -1111,6 +1136,7 @@ func TestClientSaveAndLoadStateRestoresDHTState(t *testing.T) {
 	}
 
 	restored := NewClient(settings)
+	registerClientTransferFileCleanup(t, restored)
 	if err := restored.LoadState(statePath); err != nil {
 		t.Fatalf("load state: %v", err)
 	}
@@ -1132,6 +1158,7 @@ func TestClientSetDHTStoragePoint(t *testing.T) {
 	settings.UDPPort = 0
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	if err := client.SetDHTStoragePoint("1.2.3.4:4672"); err != nil {
 		t.Fatalf("set storage point: %v", err)
 	}
@@ -1146,6 +1173,7 @@ func TestClientSearchDHTKeywordsUsesTracker(t *testing.T) {
 	settings.UDPPort = 0
 
 	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
 	tracker := client.EnableDHT()
 	addr, err := net.ResolveUDPAddr("udp", "1.2.3.4:4672")
 	if err != nil {

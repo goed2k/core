@@ -9,7 +9,7 @@ import (
 	"time"
 
 	ed2k "github.com/goed2k/core"
-	"github.com/goed2k/core/internal/bootstrap"
+	"github.com/goed2k/core/bootstrap"
 )
 
 type runConfig struct {
@@ -26,6 +26,7 @@ type runConfig struct {
 	enableCryptLayer         bool
 	enableCryptLayerRequired bool
 	enableSecIdent           bool
+	secIdentRequired         bool
 	creditsOnlyVerified      bool
 	identityKeyPath          string
 	categoriesConfig         string
@@ -35,6 +36,7 @@ type runConfig struct {
 	kadv6Nodes               string
 	peerTimeout              int
 	maxDownloadRateKB        int
+	maxUploadRateKB          int
 	timeout                  time.Duration
 	statePath                string
 	disableState             bool
@@ -67,6 +69,7 @@ func main() {
 	var links linksFlag
 	var setupWizard bool
 	var timeoutRaw string
+	var securePreset bool
 
 	flag.BoolVar(&setupWizard, "setup", false, "run interactive setup wizard before starting")
 	flag.StringVar(&cfg.outDir, "out-dir", cfg.outDir, "default download directory")
@@ -82,9 +85,12 @@ func main() {
 	flag.BoolVar(&cfg.enableCryptLayer, "crypt-layer", cfg.enableCryptLayer, "enable TCP protocol obfuscation (CryptLayer)")
 	flag.BoolVar(&cfg.enableCryptLayerRequired, "crypt-layer-required", cfg.enableCryptLayerRequired, "require CryptLayer for peer connections")
 	flag.BoolVar(&cfg.enableSecIdent, "sec-ident", cfg.enableSecIdent, "enable Secure Ident handshake")
+	flag.BoolVar(&cfg.secIdentRequired, "sec-ident-required", cfg.secIdentRequired, "disconnect peers that fail Secure Ident verification")
 	flag.BoolVar(&cfg.creditsOnlyVerified, "credits-only-verified", cfg.creditsOnlyVerified, "only accumulate credits for SecIdent-verified peers")
+	flag.BoolVar(&securePreset, "secure", false, "enable CryptLayer and SecIdent (shorthand for --crypt-layer --sec-ident)")
 	flag.StringVar(&cfg.identityKeyPath, "identity-key", cfg.identityKeyPath, "path to RSA identity private key PEM for Secure Ident")
 	flag.IntVar(&cfg.maxDownloadRateKB, "max-download-rate-kb", cfg.maxDownloadRateKB, "global download rate limit in KB/s (0=unlimited)")
+	flag.IntVar(&cfg.maxUploadRateKB, "max-upload-rate-kb", cfg.maxUploadRateKB, "global upload rate limit in KB/s (0=unlimited)")
 	flag.StringVar(&cfg.categoriesConfig, "categories", cfg.categoriesConfig, "download categories: name:ext1,ext2:dir;name2:ext:dir2")
 	flag.IntVar(&cfg.udpPortV6, "udp-port-v6", cfg.udpPortV6, "KADV6 UDP listen port")
 	flag.StringVar(&cfg.kadv6NodesDat, "kadv6-nodes-dat", cfg.kadv6NodesDat, "KADV6 nodes6.dat path or URL")
@@ -95,6 +101,11 @@ func main() {
 	flag.BoolVar(&cfg.disableState, "no-state", cfg.disableState, "disable state persistence")
 	flag.Var(&links, "link", "ed2k link to queue at startup (repeatable)")
 	flag.Parse()
+
+	if securePreset {
+		cfg.enableCryptLayer = true
+		cfg.enableSecIdent = true
+	}
 
 	if len(links) > 0 {
 		cfg.links = append(cfg.links, links...)
@@ -181,7 +192,7 @@ func setupClient(cfg runConfig) (*appContext, error) {
 
 	app := &appContext{
 		client:       client,
-		targetPaths:  nil,
+		targetPaths:  snapshotPathsFromClient(client),
 		includeDHT:   cfg.enableKAD,
 		includeDHTv6: cfg.enableKADV6,
 		noticeCh:     make(chan string, 32),
@@ -191,6 +202,19 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	}
 	bootstrap.RunBackground(client, bcfg, app.notify)
 	return app, nil
+}
+
+func snapshotPathsFromClient(client *ed2k.Client) []string {
+	if client == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(client.Status().Transfers))
+	for _, tr := range client.Status().Transfers {
+		if tr.FilePath != "" {
+			paths = append(paths, tr.FilePath)
+		}
+	}
+	return paths
 }
 
 func (a *appContext) notify(format string, args ...any) {

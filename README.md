@@ -39,7 +39,7 @@
 - [x] 状态持久化与恢复、`.part.met` JSON 导出
 - [x] 可交互终端下载管理器（TUI）
 
-Web 控制台请使用独立仓库 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)。本仓库内的 `goed2k-web` 已**废弃**，仅作历史兼容。
+Web 控制台请使用独立仓库 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)。守护进程可复用本仓库公开包 `github.com/goed2k/core/bootstrap` 进行客户端初始化。
 
 ## 相关文档
 
@@ -63,7 +63,7 @@ GOED2K_RUN_LIVE_TESTS=1 go test -run LiveDownload -count=1 .
 GOED2K_RUN_KADV6_INTEGRATION=1 go test -run KADV6PublishSearchPipelineLive -count=1 .
 ```
 
-推送至 `main` 或提交 Pull Request 时，GitHub Actions 会自动运行 `go vet`、全量单元测试与构建检查。
+推送至 `main` 或提交 Pull Request 时，GitHub Actions 会自动运行 `go vet`、全量单元测试（含覆盖率）与构建检查。Integration 工作流每日 UTC 03:00 定时运行单元测试。
 
 ### 安全与混淆开关（CLI）
 
@@ -94,7 +94,7 @@ goed2k --state-path ~/.config/goed2k/state.json \
 | 守护进程 | [goed2k/daemon](https://github.com/goed2k/daemon) | `goed2kd`，HTTP `/api/v1` + WebSocket 事件 |
 | 浏览器 UI | [goed2k/webui](https://github.com/goed2k/webui) | React 控制台，对接 daemon API |
 
-> **已废弃**：`cmd/goed2k-web` 不再维护，Release 不再分发其二进制。
+共享初始化逻辑见包 [`bootstrap`](bootstrap/doc.go)（`Config`、`InitClient`、`RunBackground`）。
 
 ## 安装
 
@@ -107,8 +107,10 @@ go install github.com/goed2k/core/cmd/goed2k@latest
 ### 作为库
 
 ```bash
-go get github.com/goed2k/core
+go get github.com/goed2k/core@v0.1.2
 ```
+
+守护进程或自定义程序可复用 `github.com/goed2k/core/bootstrap` 进行客户端初始化（见 [bootstrap/doc.go](bootstrap/doc.go)）。
 
 ## 快速开始
 

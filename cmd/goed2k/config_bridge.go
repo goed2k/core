@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/goed2k/core/internal/bootstrap"
+	"github.com/goed2k/core/bootstrap"
 )
 
 func (cfg runConfig) bootstrapConfig() bootstrap.Config {
@@ -19,6 +19,7 @@ func (cfg runConfig) bootstrapConfig() bootstrap.Config {
 		EnableCryptLayer:         cfg.enableCryptLayer,
 		EnableCryptLayerRequired: cfg.enableCryptLayerRequired,
 		EnableSecIdent:           cfg.enableSecIdent,
+		SecIdentRequired:         cfg.secIdentRequired,
 		CreditsOnlyVerified:      cfg.creditsOnlyVerified,
 		IdentityKeyPath:          cfg.identityKeyPath,
 		CategoriesConfig:         cfg.categoriesConfig,
@@ -28,6 +29,7 @@ func (cfg runConfig) bootstrapConfig() bootstrap.Config {
 		KADV6Nodes:               cfg.kadv6Nodes,
 		PeerTimeout:              cfg.peerTimeout,
 		MaxDownloadRateKB:        cfg.maxDownloadRateKB,
+		MaxUploadRateKB:          cfg.maxUploadRateKB,
 		Timeout:                  cfg.timeout,
 		StatePath:                cfg.statePath,
 		DisableState:             cfg.disableState,

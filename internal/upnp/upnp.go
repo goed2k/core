@@ -52,8 +52,8 @@ import (
 )
 
 var (
-	// Debug Set this to true to print debug information
-	Debug = true
+	// Debug 设为 true 时输出 UPnP 发现与映射的调试日志（默认关闭）。
+	Debug = false
 )
 
 func init() {

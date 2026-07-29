@@ -6,16 +6,31 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-29
+
 ### 新增
 
 - CLI 状态持久化：默认 `~/.config/goed2k/state.json`，`--state-path` / `--no-state`
 - CLI 补全参数：`--server`、`--out-dir`、`--kad`、`--upnp`、`--listen-port`、`--link`、`--setup`、`--timeout` 等
-- 共享包 `internal/bootstrap`：CLI 客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
+- 公开包 `bootstrap`：CLI / daemon 共享的客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
+- `--timeout` / `--link` 模式下 TUI 在任务全部完成或超时后自动退出
+- CLI：`--sec-ident-required`、`--max-upload-rate-kb`、`--secure`（CryptLayer + SecIdent 预设）
+- `TestEMuleInteropHarness`：本地双端上传与协议线格式回归
 
 ### 变更
 
-- **废弃** `cmd/goed2k-web` 与 `internal/webapi`：请改用 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)
-- CI / Release 不再构建 `goed2k-web` 二进制
+- **移除** `cmd/goed2k-web` 与 `internal/webapi`：请改用 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)
+- UPnP 调试日志默认关闭（`upnp.Debug`）
+- 连接读缓冲复用，减少每 tick 分配；补充 I/O 超时注释
+- TUI：有任务时进入 `/setting` 显示中文锁定提示
+- CI：单元测试输出 `-coverprofile` 覆盖率摘要
+- Integration 工作流：每日 UTC 03:00 定时运行
+- Release 矩阵：linux/windows/darwin × amd64/arm64
+
+### 修复
+
+- Windows CI：`registerClientTransferFileCleanup` 推广，避免 TempDir 清理时文件句柄未关闭
+- TUI：`--timeout` 在交互模式下真正生效
 
 ## [0.1.1] - 2026-07-29
 
