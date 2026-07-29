@@ -560,7 +560,7 @@ func (s *Session) RefreshUPnPMapping() {
 }
 
 func (s *Session) SecondTick(currentSessionTime, tickIntervalMS int64) {
-	s.PumpIO()
+	s.acceptIncomingConnections()
 	for _, t := range s.snapshotTransfers() {
 		t.SecondTick(&s.accumulator, tickIntervalMS)
 	}
@@ -582,10 +582,15 @@ func (s *Session) SecondTick(currentSessionTime, tickIntervalMS int64) {
 	s.processDiskTasks()
 	s.accumulator.SecondTick(tickIntervalMS)
 	s.ConnectNewPeers()
+	s.pumpConnectionIO()
 }
 
 func (s *Session) PumpIO() {
 	s.acceptIncomingConnections()
+	s.pumpConnectionIO()
+}
+
+func (s *Session) pumpConnectionIO() {
 	for _, sc := range s.activeServerConnections() {
 		if sc == nil {
 			continue
@@ -622,11 +627,21 @@ func (s *Session) PumpIO() {
 			}
 			continue
 		}
-		if err := conn.FlushOutgoing(); err != nil {
-			debugPeerf("peer %s flush error: %v", conn.Endpoint().String(), err)
+		if oc, ok := conn.socket.(*ObfuscatedConn); ok && !oc.handshakeComplete() {
+			if err := conn.DoRead(); err != nil {
+				debugPeerf("peer %s read error: %v", conn.Endpoint().String(), err)
+			}
+			if oc.handshakeComplete() && !conn.obfHelloQueued {
+				conn.obfHelloQueued = true
+				conn.OnConnect()
+			}
+			continue
 		}
 		if err := conn.DoRead(); err != nil {
 			debugPeerf("peer %s read error: %v", conn.Endpoint().String(), err)
+		}
+		if err := conn.FlushOutgoing(); err != nil {
+			debugPeerf("peer %s flush error: %v", conn.Endpoint().String(), err)
 		}
 		if conn.transferringData {
 			conn.ReceivePendingData()

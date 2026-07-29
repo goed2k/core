@@ -1,6 +1,7 @@
 package goed2k
 
 import (
+	"bytes"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rc4"
@@ -121,26 +122,23 @@ type ObfuscatedConn struct {
 	remoteHash protocol.Hash
 	required   bool
 	handshake  *obfHandshakeMachine
-	readBuf    []byte
+	readBuf       []byte
+	handshakeBuf  []byte
 }
 
-// NewOutgoingClientObfuscatedConn performs the client-client obfuscation handshake as initiator.
+// NewOutgoingClientObfuscatedConn wraps a TCP connection for client-client obfuscation.
+// The handshake is completed lazily on the first Read/Write via PumpIO (non-blocking).
 func NewOutgoingClientObfuscatedConn(conn net.Conn, peerUserHash protocol.Hash) (net.Conn, error) {
 	if conn == nil || peerUserHash.Equal(protocol.Invalid) {
 		return nil, errObfuscationHandshake
 	}
-	oc := &ObfuscatedConn{
+	return &ObfuscatedConn{
 		Conn:       conn,
 		role:       obfRoleOutgoingClient,
 		state:      obfStateHandshake,
 		remoteHash: peerUserHash,
 		handshake:  newOutgoingClientHandshake(peerUserHash),
-	}
-	if err := oc.completeOutgoingClientHandshake(); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	return oc, nil
+	}, nil
 }
 
 // WrapIncomingObfuscatedConn accepts an inbound connection that may use obfuscation.
@@ -173,6 +171,12 @@ func NewOutgoingServerObfuscatedConn(conn net.Conn) (net.Conn, error) {
 	return oc, nil
 }
 
+func (o *ObfuscatedConn) handshakeComplete() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.state != obfStateHandshake
+}
+
 func (o *ObfuscatedConn) Read(p []byte) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -180,7 +184,7 @@ func (o *ObfuscatedConn) Read(p []byte) (int, error) {
 		return o.Conn.Read(p)
 	}
 	if o.state == obfStateHandshake {
-		if err := o.advanceIncomingHandshake(); err != nil {
+		if err := o.advanceHandshake(); err != nil {
 			return 0, err
 		}
 	}
@@ -206,7 +210,14 @@ func (o *ObfuscatedConn) Write(p []byte) (int, error) {
 		return o.Conn.Write(p)
 	}
 	if o.state == obfStateHandshake {
-		return 0, io.ErrShortBuffer
+		if o.role == obfRoleOutgoingClient {
+			if err := o.advanceOutgoingClientHandshake(); err != nil {
+				return 0, err
+			}
+		}
+		if o.state == obfStateHandshake {
+			return 0, io.ErrShortBuffer
+		}
 	}
 	if o.sendCipher == nil {
 		return o.Conn.Write(p)
@@ -274,7 +285,30 @@ func (o *ObfuscatedConn) advanceIncomingHandshake() error {
 		return errObfuscationHandshake
 	}
 	for o.state == obfStateHandshake {
-		step, err := o.handshake.readStep(o.Conn)
+		tmp := make([]byte, 256)
+		n, err := o.Conn.Read(tmp)
+		if n > 0 {
+			o.handshakeBuf = append(o.handshakeBuf, tmp[:n]...)
+		}
+		if len(o.handshakeBuf) == 0 {
+			if err != nil {
+				if ne, ok := err.(net.Error); ok && ne.Timeout() {
+					return nil
+				}
+				if err == io.EOF {
+					return nil
+				}
+				return err
+			}
+			return nil
+		}
+		reader := bytes.NewReader(o.handshakeBuf)
+		step, err := o.handshake.readStep(reader)
+		consumed := len(o.handshakeBuf) - reader.Len()
+		if errors.Is(err, errHandshakeIncomplete) {
+			return nil
+		}
+		o.handshakeBuf = append([]byte(nil), o.handshakeBuf[consumed:]...)
 		if err != nil {
 			if errors.Is(err, errObfuscationPlain) {
 				o.state = obfStatePlain
@@ -374,6 +408,8 @@ type obfHandshakeStep struct {
 
 var errObfuscationPlain = errors.New("plain connection")
 
+var errHandshakeIncomplete = errors.New("handshake incomplete")
+
 type obfHandshakeMachine struct {
 	role            obfHandshakeRole
 	localHash       protocol.Hash
@@ -382,7 +418,98 @@ type obfHandshakeMachine struct {
 	randomKeyPart   uint32
 	sendKey         []byte
 	recvKey         []byte
+	responseBuf     []byte
 	serverDH        *serverDHState
+}
+
+func (o *ObfuscatedConn) advanceHandshake() error {
+	switch o.role {
+	case obfRoleIncomingClient:
+		return o.advanceIncomingHandshake()
+	case obfRoleOutgoingClient:
+		return o.advanceOutgoingClientHandshake()
+	default:
+		return errObfuscationHandshake
+	}
+}
+
+func (o *ObfuscatedConn) advanceOutgoingClientHandshake() error {
+	h := o.handshake
+	if h == nil {
+		return errObfuscationHandshake
+	}
+	if h.phase >= 2 {
+		return nil
+	}
+	if h.phase == 0 {
+		req, sendKey, recvKey, err := h.buildOutgoingRequest()
+		if err != nil {
+			return err
+		}
+		if _, err := o.Conn.Write(req); err != nil {
+			return err
+		}
+		h.sendKey = sendKey
+		h.recvKey = recvKey
+		h.phase = 1
+	}
+	if h.phase != 1 {
+		return nil
+	}
+	tmp := make([]byte, 64)
+	n, err := o.Conn.Read(tmp)
+	if n > 0 {
+		h.responseBuf = append(h.responseBuf, tmp[:n]...)
+	}
+	if err != nil {
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return nil
+		}
+		if len(h.responseBuf) == 0 {
+			return err
+		}
+	}
+	if len(h.responseBuf) < 6 {
+		return nil
+	}
+	resp := make([]byte, len(h.responseBuf))
+	copy(resp, h.responseBuf)
+	recvHandshake, err := newRC4StreamCipher(h.recvKey, 0)
+	if err != nil {
+		return err
+	}
+	recvHandshake.cipher.XORKeyStream(resp[:6], h.responseBuf[:6])
+	if binary.LittleEndian.Uint32(resp[:4]) != magicValueSync {
+		return errObfuscationHandshake
+	}
+	if resp[4] != encryptionMethodObfuscation {
+		return errObfuscationHandshake
+	}
+	padLen := int(resp[5])
+	if padLen > 16 {
+		return errObfuscationHandshake
+	}
+	need := 6 + padLen
+	if len(h.responseBuf) < need {
+		return nil
+	}
+	if padLen > 0 {
+		padding := make([]byte, padLen)
+		copy(padding, h.responseBuf[6:need])
+		recvHandshake.cipher.XORKeyStream(padding, padding)
+	}
+	if err := o.activateCiphers(h.sendKey, h.recvKey); err != nil {
+		return err
+	}
+	if len(h.responseBuf) > need {
+		extra := make([]byte, len(h.responseBuf)-need)
+		copy(extra, h.responseBuf[need:])
+		o.recvCipher.cipher.XORKeyStream(extra, h.responseBuf[need:])
+		o.readBuf = append(o.readBuf, extra...)
+	}
+	h.responseBuf = nil
+	h.phase = 2
+	return nil
 }
 
 func newOutgoingClientHandshake(peerHash protocol.Hash) *obfHandshakeMachine {
@@ -430,19 +557,19 @@ func newIncomingClientHandshake(localHash protocol.Hash, forceObfuscated bool) *
 	}
 }
 
-func (h *obfHandshakeMachine) readStep(conn net.Conn) (obfHandshakeStep, error) {
+func (h *obfHandshakeMachine) readStep(r *bytes.Reader) (obfHandshakeStep, error) {
 	if h.phase > 0 {
 		return obfHandshakeStep{}, errObfuscationHandshake
 	}
 	marker := make([]byte, 1)
-	if _, err := io.ReadFull(conn, marker); err != nil {
+	if err := readFullOrIncomplete(r, marker); err != nil {
 		return obfHandshakeStep{}, err
 	}
 	if !h.forceObfuscated && isProtocolMarker(marker[0]) {
 		return obfHandshakeStep{leftover: marker}, errObfuscationPlain
 	}
 	rk := make([]byte, 4)
-	if _, err := io.ReadFull(conn, rk); err != nil {
+	if err := readFullOrIncomplete(r, rk); err != nil {
 		return obfHandshakeStep{}, err
 	}
 	h.randomKeyPart = binary.LittleEndian.Uint32(rk)
@@ -453,7 +580,7 @@ func (h *obfHandshakeMachine) readStep(conn net.Conn) (obfHandshakeStep, error) 
 		return obfHandshakeStep{}, err
 	}
 	header := make([]byte, 7)
-	if _, err := io.ReadFull(conn, header); err != nil {
+	if err := readFullOrIncomplete(r, header); err != nil {
 		return obfHandshakeStep{}, err
 	}
 	recvHandshake.cipher.XORKeyStream(header, header)
@@ -466,7 +593,7 @@ func (h *obfHandshakeMachine) readStep(conn net.Conn) (obfHandshakeStep, error) 
 	}
 	if padLen > 0 {
 		padding := make([]byte, padLen)
-		if _, err := io.ReadFull(conn, padding); err != nil {
+		if err := readFullOrIncomplete(r, padding); err != nil {
 			return obfHandshakeStep{}, err
 		}
 		recvHandshake.cipher.XORKeyStream(padding, padding)
@@ -482,6 +609,14 @@ func (h *obfHandshakeMachine) readStep(conn net.Conn) (obfHandshakeStep, error) 
 		recvKey:  h.recvKey,
 		done:     true,
 	}, nil
+}
+
+func readFullOrIncomplete(r *bytes.Reader, buf []byte) error {
+	if r.Len() < len(buf) {
+		return errHandshakeIncomplete
+	}
+	_, err := io.ReadFull(r, buf)
+	return err
 }
 
 func buildClientClientRequestPayload() ([]byte, error) {
@@ -627,14 +762,12 @@ func peerWantsObfuscation(peer *Peer, settings Settings) bool {
 	return opts&cryptOptionRequested != 0 || opts&cryptOptionRequired != 0
 }
 
-func obfuscationDialAddr(base *net.TCPAddr, settings Settings) *net.TCPAddr {
+func obfuscationDialAddr(base *net.TCPAddr, _ Settings) *net.TCPAddr {
 	if base == nil {
 		return nil
 	}
-	port := settings.ObfuscationTCPPort
-	if port <= 0 && settings.ListenPort > 0 {
-		port = settings.ListenPort + 3
-	}
+	// eMule 约定：对端混淆端口为其 TCP 端口 + 3（与本地 ListenPort 无关）。
+	port := base.Port + 3
 	if port <= 0 || port == base.Port {
 		return nil
 	}

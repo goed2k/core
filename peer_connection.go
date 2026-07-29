@@ -11,6 +11,7 @@ import (
 	"net"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/internal/logx"
@@ -177,6 +178,8 @@ type PeerConnection struct {
 	helloInfoFlags     byte
 	remoteFileRating   byte
 	remoteFileComment  string
+	helloOnce          sync.Once
+	obfHelloQueued     bool
 }
 
 func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Transfer, peerInfo *Peer) *PeerConnection {
@@ -206,8 +209,10 @@ func NewIncomingPeerConnection(session *Session, conn net.Conn, forceObfuscated 
 		uploadDone:       make([]RequestedUploadBlock, 0),
 		pendingAICHPiece: -1,
 	}
-	if forceObfuscated || session.settings.EnableCryptLayer || session.settings.CryptLayerRequired {
-		pc.socket = WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), forceObfuscated, session.settings.CryptLayerRequired)
+	if forceObfuscated {
+		pc.socket = WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), true, session.settings.CryptLayerRequired)
+	} else if session.settings.CryptLayerRequired {
+		pc.socket = WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), false, true)
 	} else {
 		pc.socket = conn
 	}
@@ -251,7 +256,6 @@ func (p *PeerConnection) Connect() error {
 				obfConn, obfErr := NewOutgoingClientObfuscatedConn(conn, peerHash)
 				if obfErr == nil {
 					p.socket = obfConn
-					p.OnConnect()
 					return nil
 				}
 				_ = conn.Close()
@@ -432,10 +436,12 @@ func (p *PeerConnection) PrepareHello() clientproto.Hello {
 }
 
 func (p *PeerConnection) OnConnect() {
-	packet := p.PrepareHello()
-	if raw, err := p.combiner.Pack("client.Hello", &packet); err == nil {
-		p.QueuePacket(raw)
-	}
+	p.helloOnce.Do(func() {
+		packet := p.PrepareHello()
+		if raw, err := p.combiner.Pack("client.Hello", &packet); err == nil {
+			p.QueuePacket(raw)
+		}
+	})
 }
 
 func (p *PeerConnection) buildExtendedHandshake() clientproto.ExtendedHandshake {
