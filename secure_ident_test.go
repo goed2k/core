@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/goed2k/core/protocol"
@@ -24,7 +25,7 @@ func TestGenerateIdentityKeyPairAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat key: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if info.Mode().Perm() != 0o600 && runtime.GOOS != "windows" {
 		t.Fatalf("expected key mode 0600, got %o", info.Mode().Perm())
 	}
 	if !id.Available() {

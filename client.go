@@ -648,7 +648,7 @@ func (c *Client) loadServerMet(source string) (*serverproto.ServerMet, error) {
 	if err == nil && parsedURL.Scheme != "" {
 		switch parsedURL.Scheme {
 		case "file":
-			return serverproto.LoadServerMet(parsedURL.Path)
+			return serverproto.LoadServerMet(localPathFromFileURL(parsedURL))
 		case "http", "https":
 			data, err := fetchRemoteResource(source)
 			if err != nil {
@@ -670,7 +670,7 @@ func (c *Client) loadDHTv6NodesDat(source string) (*kadv6proto.NodesDat, error) 
 	if err == nil && parsedURL.Scheme != "" {
 		switch parsedURL.Scheme {
 		case "file":
-			return kadv6proto.LoadNodesDat(parsedURL.Path)
+			return kadv6proto.LoadNodesDat(localPathFromFileURL(parsedURL))
 		case "http", "https":
 			data, err := fetchRemoteResource(source)
 			if err != nil {
@@ -682,6 +682,23 @@ func (c *Client) loadDHTv6NodesDat(source string) (*kadv6proto.NodesDat, error) 
 	return kadv6proto.LoadNodesDat(source)
 }
 
+// localPathFromFileURL converts a file:// URL to a local filesystem path (Windows-safe).
+func localPathFromFileURL(u *url.URL) string {
+	path := u.Path
+	if path == "" || path == "/" {
+		if u.Host != "" {
+			path = u.Host
+		} else if u.Opaque != "" {
+			path = u.Opaque
+		}
+	}
+	// file:///C:/foo on Windows yields Path=/C:/foo
+	if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return filepath.FromSlash(path)
+}
+
 func (c *Client) loadDHTNodesDat(source string) (*kadproto.NodesDat, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -691,7 +708,7 @@ func (c *Client) loadDHTNodesDat(source string) (*kadproto.NodesDat, error) {
 	if err == nil && parsedURL.Scheme != "" {
 		switch parsedURL.Scheme {
 		case "file":
-			return kadproto.LoadNodesDat(parsedURL.Path)
+			return kadproto.LoadNodesDat(localPathFromFileURL(parsedURL))
 		case "http", "https":
 			data, err := fetchRemoteResource(source)
 			if err != nil {

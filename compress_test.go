@@ -143,6 +143,11 @@ func TestSendBlockDataUsesCompressedPartWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transfer: %v", err)
 	}
+	t.Cleanup(func() {
+		if transfer.handler != nil {
+			_ = transfer.handler.Close()
+		}
+	})
 	transfer.WeHave(0)
 
 	endpoint, err := protocol.EndpointFromString("127.0.0.1", 4662)

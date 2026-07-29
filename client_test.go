@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,14 @@ import (
 	"github.com/goed2k/core/protocol"
 	kadproto "github.com/goed2k/core/protocol/kad"
 )
+
+func fileURLFromPath(path string) string {
+	slash := filepath.ToSlash(path)
+	if strings.HasPrefix(slash, "/") {
+		return "file://" + slash
+	}
+	return "file:///" + slash
+}
 
 type memoryClientStateStore struct {
 	state *ClientState
@@ -816,7 +825,7 @@ func TestClientLoadDHTNodesDatSupportsHTTPFileAndMultipleSources(t *testing.T) {
 
 	client := NewClient(settings)
 	baseNodes := len(client.EnableDHT().nodes)
-	if err := client.LoadDHTNodesDat(pathA, "file://"+pathB, httpSrv.URL); err != nil {
+	if err := client.LoadDHTNodesDat(pathA, fileURLFromPath(pathB), httpSrv.URL); err != nil {
 		t.Fatalf("load multiple nodes.dat sources: %v", err)
 	}
 
