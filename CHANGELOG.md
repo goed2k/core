@@ -10,14 +10,13 @@
 
 - CLI 状态持久化：默认 `~/.config/goed2k/state.json`，`--state-path` / `--no-state`
 - CLI 补全参数：`--server`、`--out-dir`、`--kad`、`--upnp`、`--listen-port`、`--link`、`--setup`、`--timeout` 等
-- 共享包 `internal/bootstrap`：CLI 客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
+- 公开包 `bootstrap`：CLI / daemon 共享的客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
 - `--timeout` / `--link` 模式下 TUI 在任务全部完成或超时后自动退出
 - CLI：`--sec-ident-required`、`--max-upload-rate-kb`、`--secure`（CryptLayer + SecIdent 预设）
 
 ### 变更
 
-- **废弃** `cmd/goed2k-web` 与 `internal/webapi`：请改用 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)
-- CI / Release 不再构建 `goed2k-web` 二进制
+- **移除** `cmd/goed2k-web` 与 `internal/webapi`：请改用 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)
 
 ## [0.1.1] - 2026-07-29
 

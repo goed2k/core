@@ -9,7 +9,7 @@ import (
 	"time"
 
 	ed2k "github.com/goed2k/core"
-	"github.com/goed2k/core/internal/bootstrap"
+	"github.com/goed2k/core/bootstrap"
 )
 
 type runConfig struct {

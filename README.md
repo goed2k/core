@@ -39,7 +39,7 @@
 - [x] 状态持久化与恢复、`.part.met` JSON 导出
 - [x] 可交互终端下载管理器（TUI）
 
-Web 控制台请使用独立仓库 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)。本仓库内的 `goed2k-web` 已**废弃**，仅作历史兼容。
+Web 控制台请使用独立仓库 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)。守护进程可复用本仓库公开包 `github.com/goed2k/core/bootstrap` 进行客户端初始化。
 
 ## 相关文档
 
@@ -94,7 +94,7 @@ goed2k --state-path ~/.config/goed2k/state.json \
 | 守护进程 | [goed2k/daemon](https://github.com/goed2k/daemon) | `goed2kd`，HTTP `/api/v1` + WebSocket 事件 |
 | 浏览器 UI | [goed2k/webui](https://github.com/goed2k/webui) | React 控制台，对接 daemon API |
 
-> **已废弃**：`cmd/goed2k-web` 不再维护，Release 不再分发其二进制。
+共享初始化逻辑见包 [`bootstrap`](bootstrap/doc.go)（`Config`、`InitClient`、`RunBackground`）。
 
 ## 安装
 

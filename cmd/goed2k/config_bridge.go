@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/goed2k/core/internal/bootstrap"
+	"github.com/goed2k/core/bootstrap"
 )
 
 func (cfg runConfig) bootstrapConfig() bootstrap.Config {
