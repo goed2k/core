@@ -956,7 +956,7 @@ func TestClientLoadServerMetParsesFixture(t *testing.T) {
 	settings.ListenPort = 0
 	client := NewClient(settings)
 
-	path := filepath.Join("..", "jed2k", "core", "src", "main", "resources", "server.met")
+	path := jed2kServerMetFixturePath(t)
 	entries, err := client.LoadServerMet(path)
 	if err != nil {
 		t.Fatalf("load server.met: %v", err)
@@ -981,7 +981,7 @@ func TestClientLoadServerMetParsesServerListED2KLink(t *testing.T) {
 	settings.ListenPort = 0
 	client := NewClient(settings)
 
-	fixturePath := filepath.Join("..", "jed2k", "core", "src", "main", "resources", "server.met")
+	fixturePath := jed2kServerMetFixturePath(t)
 	payload, err := os.ReadFile(fixturePath)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)

@@ -4,6 +4,13 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- GitHub Actions CI：push/PR 自动运行 `go vet`、`-race` 单元测试与构建
+- 外网联调测试默认跳过（`GOED2K_RUN_LIVE_TESTS=1` 手动启用）
+
 ## [0.1.0] - 2026-07-29
 
 ### 新增
