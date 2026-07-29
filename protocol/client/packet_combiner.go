@@ -7,6 +7,7 @@ const (
 	opEmuleInfo         byte = 0x01
 	opEmuleInfoAnswer   byte = 0x02
 	opQueueRanking      byte = 0x60
+	opFileComment       byte = 0x61
 	opHelloAnswer       byte = 0x4C
 	opSetReqFileID      byte = 0x4F
 	opFileStatus        byte = 0x50
@@ -27,6 +28,13 @@ const (
 	opCompressedPart64  byte = 0xA1
 	opRequestSources2   byte = 0x83
 	opAnswerSources2    byte = 0x84
+	opAICHRequest       byte = 0x9B
+	opAICHAnswer        byte = 0x9C
+	opAICHFileHashAns   byte = 0x9D
+	opAICHFileHashReq   byte = 0x9E
+	opPublicKey         byte = 0x85
+	opSignature         byte = 0x86
+	opSecIdentState     byte = 0x87
 )
 
 func NewPacketCombiner() protocol.PacketCombiner {
@@ -61,6 +69,7 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opCancelTransfer), "client.CancelTransfer", func() protocol.Serializable { return &CancelTransfer{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opOutOfPartReqs), "client.OutOfParts", func() protocol.Serializable { return &OutOfParts{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opQueueRanking), "client.QueueRanking", func() protocol.Serializable { return &QueueRanking{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opFileComment), "client.FileComment", func() protocol.Serializable { return &FileComment{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opRequestParts32), "client.RequestParts32", func() protocol.Serializable { return &RequestParts32{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opRequestParts64), "client.RequestParts64", func() protocol.Serializable { return &RequestParts64{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opSendingPart32), "client.SendingPart32", func() protocol.Serializable { return &SendingPart32{} })
@@ -69,5 +78,12 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc.Register(protocol.PK(protocol.EMuleProt, opCompressedPart64), "client.CompressedPart64", func() protocol.Serializable { return &CompressedPart64{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opRequestSources2), "client.RequestSources2", func() protocol.Serializable { return &RequestSources2{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opAnswerSources2), "client.AnswerSources2", func() protocol.Serializable { return &AnswerSources2{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHRequest), "client.AICHRequest", func() protocol.Serializable { return &AICHRequest{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHAnswer), "client.AICHAnswer", func() protocol.Serializable { return &AICHAnswer{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHFileHashReq), "client.AICHFileHashRequest", func() protocol.Serializable { return &AICHFileHashRequest{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHFileHashAns), "client.AICHFileHashAnswer", func() protocol.Serializable { return &AICHFileHashAnswer{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opPublicKey), "client.PublicKey", func() protocol.Serializable { return &PublicKey{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opSignature), "client.Signature", func() protocol.Serializable { return &Signature{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opSecIdentState), "client.SecIdentState", func() protocol.Serializable { return &SecIdentState{} })
 	return pc
 }

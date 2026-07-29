@@ -16,6 +16,11 @@ const (
 	globUDPThrottleMs      = int64(45000)
 )
 
+type globUDPChallengeEntry struct {
+	identifier string
+	sentAt     int64
+}
+
 // SetServerMetadata 记录 server.met 中的名称与描述（identifier 为 host:port）。
 func (s *Session) SetServerMetadata(identifier, name, description string) {
 	s.mu.Lock()
@@ -37,7 +42,7 @@ func (s *Session) handleGlobServStatUDP(addr *net.UDPAddr, buf []byte) {
 	soft := binary.LittleEndian.Uint32(buf[18:22])
 	hard := binary.LittleEndian.Uint32(buf[22:26])
 	s.mu.Lock()
-	id, ok := s.globUDPChallenge[challenge]
+	entry, ok := s.globUDPChallenge[challenge]
 	if ok {
 		delete(s.globUDPChallenge, challenge)
 	}
@@ -45,11 +50,17 @@ func (s *Session) handleGlobServStatUDP(addr *net.UDPAddr, buf []byte) {
 	if !ok {
 		return
 	}
+	now := CurrentTime()
+	if entry.sentAt > 0 {
+		if policy := s.ensureServerConnectionPolicy(entry.identifier); policy != nil {
+			policy.SetPingResult(now-entry.sentAt, 0, now)
+		}
+	}
 	s.mu.Lock()
 	if s.udpServerStats == nil {
 		s.udpServerStats = make(map[string]serverUDPStats)
 	}
-	s.udpServerStats[id] = serverUDPStats{
+	s.udpServerStats[entry.identifier] = serverUDPStats{
 		Users: users, Files: files, MaxUsers: maxU, SoftFiles: soft, HardFiles: hard, Valid: true,
 	}
 	s.mu.Unlock()
@@ -154,26 +165,36 @@ func (s *Session) maybePollServerGlobUDP(now int64) {
 		if addr == nil {
 			continue
 		}
-		var b [4]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			continue
-		}
-		challenge := binary.LittleEndian.Uint32(b[:])
-		if challenge == 0 {
-			challenge = 1
-		}
-		s.mu.Lock()
-		if s.globUDPChallenge == nil {
-			s.globUDPChallenge = make(map[uint32]string)
-		}
-		s.globUDPChallenge[challenge] = sc.GetIdentifier()
-		s.mu.Unlock()
-		udpAddr := &net.UDPAddr{IP: addr.IP, Port: addr.Port + serverUDPPortOffset}
-		pkt := make([]byte, 6)
-		pkt[0], pkt[1] = ed2kUDPHeader, opGlobServStatReq
-		binary.LittleEndian.PutUint32(pkt[2:6], challenge)
-		if _, err := c.WriteToUDP(pkt, udpAddr); err == nil {
-			sc.lastGlobUDPQuery = now
-		}
+		s.probeServerUDP(sc.GetIdentifier(), addr, now)
 	}
+}
+
+func (s *Session) probeServerUDP(identifier string, addr *net.TCPAddr, now int64) {
+	c := s.globUDPWriteConn()
+	if c == nil || identifier == "" || addr == nil {
+		return
+	}
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return
+	}
+	challenge := binary.LittleEndian.Uint32(b[:])
+	if challenge == 0 {
+		challenge = 1
+	}
+	s.mu.Lock()
+	if s.globUDPChallenge == nil {
+		s.globUDPChallenge = make(map[uint32]globUDPChallengeEntry)
+	}
+	s.globUDPChallenge[challenge] = globUDPChallengeEntry{identifier: identifier, sentAt: now}
+	s.mu.Unlock()
+	udpAddr := &net.UDPAddr{IP: addr.IP, Port: addr.Port + serverUDPPortOffset}
+	pkt := make([]byte, 6)
+	pkt[0], pkt[1] = ed2kUDPHeader, opGlobServStatReq
+	binary.LittleEndian.PutUint32(pkt[2:6], challenge)
+	_, _ = c.WriteToUDP(pkt, udpAddr)
+}
+
+func (s *Session) ProbeServerPing(identifier string, address *net.TCPAddr) {
+	s.probeServerUDP(identifier, address, CurrentTime())
 }

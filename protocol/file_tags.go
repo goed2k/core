@@ -11,4 +11,6 @@ const (
 	FTMediaLength     byte = 0xD3
 	FTMediaBitrate    byte = 0xD4
 	FTMediaCodec      byte = 0xD5
+	FTFileComment     byte = 0xF6
+	FTFileRating      byte = 0xF7
 )

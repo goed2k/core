@@ -19,8 +19,12 @@ const (
 	setupFocusUPnP
 	setupFocusKADNodesDat
 	setupFocusKADNodes
+	setupFocusKADV6
+	setupFocusKADV6NodesDat
+	setupFocusKADV6Nodes
 	setupFocusListenPort
 	setupFocusUDPPort
+	setupFocusUDPPortV6
 	setupFocusPeerTimeout
 	setupFocusTimeout
 	setupFocusLinkInput
@@ -32,16 +36,19 @@ const (
 type setupFinishedMsg struct{}
 
 type setupModel struct {
-	outDirInput      textinput.Model
-	serverInput      textinput.Model
-	serverMetInput   textinput.Model
-	kadNodesDatInput textinput.Model
-	kadNodesInput    textinput.Model
-	listenPortInput  textinput.Model
-	udpPortInput     textinput.Model
-	peerTimeoutInput textinput.Model
-	timeoutInput     textinput.Model
-	linkInput        textinput.Model
+	outDirInput        textinput.Model
+	serverInput        textinput.Model
+	serverMetInput     textinput.Model
+	kadNodesDatInput   textinput.Model
+	kadNodesInput      textinput.Model
+	kadv6NodesDatInput textinput.Model
+	kadv6NodesInput    textinput.Model
+	listenPortInput    textinput.Model
+	udpPortInput       textinput.Model
+	udpPortV6Input     textinput.Model
+	peerTimeoutInput   textinput.Model
+	timeoutInput       textinput.Model
+	linkInput          textinput.Model
 
 	cfg          runConfig
 	focus        int
@@ -76,8 +83,11 @@ func newSetupModel(cfg runConfig) setupModel {
 	m.serverMetInput = newSetupInput("path/url/ed2k serverlist", cfg.serverMetPath)
 	m.kadNodesDatInput = newSetupInput("path,url,path,url", cfg.kadNodesDat)
 	m.kadNodesInput = newSetupInput("udp-host:port,udp-host:port", cfg.kadNodes)
+	m.kadv6NodesDatInput = newSetupInput("path,url,path,url", cfg.kadv6NodesDat)
+	m.kadv6NodesInput = newSetupInput("[ipv6]:port,[ipv6]:port", cfg.kadv6Nodes)
 	m.listenPortInput = newSetupInput("4661", strconv.Itoa(cfg.listenPort))
 	m.udpPortInput = newSetupInput("4662", strconv.Itoa(cfg.udpPort))
+	m.udpPortV6Input = newSetupInput("4672", strconv.Itoa(cfg.udpPortV6))
 	m.peerTimeoutInput = newSetupInput("30", strconv.Itoa(cfg.peerTimeout))
 	timeoutValue := ""
 	if cfg.timeout > 0 {
@@ -146,6 +156,10 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableUPnP = !m.cfg.enableUPnP
 				return m, nil
 			}
+			if m.focus == setupFocusKADV6 {
+				m.cfg.enableKADV6 = !m.cfg.enableKADV6
+				return m, nil
+			}
 		case "enter":
 			switch m.focus {
 			case setupFocusKAD:
@@ -181,10 +195,16 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.kadNodesDatInput, cmd = m.kadNodesDatInput.Update(msg)
 	case setupFocusKADNodes:
 		m.kadNodesInput, cmd = m.kadNodesInput.Update(msg)
+	case setupFocusKADV6NodesDat:
+		m.kadv6NodesDatInput, cmd = m.kadv6NodesDatInput.Update(msg)
+	case setupFocusKADV6Nodes:
+		m.kadv6NodesInput, cmd = m.kadv6NodesInput.Update(msg)
 	case setupFocusListenPort:
 		m.listenPortInput, cmd = m.listenPortInput.Update(msg)
 	case setupFocusUDPPort:
 		m.udpPortInput, cmd = m.udpPortInput.Update(msg)
+	case setupFocusUDPPortV6:
+		m.udpPortV6Input, cmd = m.udpPortV6Input.Update(msg)
 	case setupFocusPeerTimeout:
 		m.peerTimeoutInput, cmd = m.peerTimeoutInput.Update(msg)
 	case setupFocusTimeout:
@@ -206,15 +226,19 @@ func (m setupModel) View() string {
 		m.renderToggle(setupFocusUPnP, "UPNP", m.cfg.enableUPnP),
 		m.renderField(setupFocusKADNodesDat, "KAD nodes.dat", m.kadNodesDatInput.View()),
 		m.renderField(setupFocusKADNodes, "KAD bootstrap", m.kadNodesInput.View()),
+		m.renderToggle(setupFocusKADV6, "KADV6", m.cfg.enableKADV6),
+		m.renderField(setupFocusKADV6NodesDat, "KADV6 nodes6.dat", m.kadv6NodesDatInput.View()),
+		m.renderField(setupFocusKADV6Nodes, "KADV6 bootstrap", m.kadv6NodesInput.View()),
 		m.renderField(setupFocusListenPort, "Listen port", m.listenPortInput.View()),
 		m.renderField(setupFocusUDPPort, "UDP port", m.udpPortInput.View()),
+		m.renderField(setupFocusUDPPortV6, "UDP6 port", m.udpPortV6Input.View()),
 		m.renderField(setupFocusPeerTimeout, "Peer timeout", m.peerTimeoutInput.View()),
 		m.renderField(setupFocusTimeout, "Timeout", m.timeoutInput.View()),
 		m.renderField(setupFocusLinkInput, "Add link", m.linkInput.View()),
 		m.renderLinks(),
 		m.renderStart(),
 		"",
-		footerStyle.Render("Tab/Shift+Tab move • Enter add/start • Space toggle KAD/UPNP • d delete link • q quit"),
+		footerStyle.Render("Tab/Shift+Tab move • Enter add/start • Space toggle KAD/UPNP/KADV6 • d delete link • q quit"),
 	}
 	if strings.TrimSpace(m.status) != "" {
 		lines = append(lines, footerStyle.Render(m.status))
@@ -283,8 +307,11 @@ func (m *setupModel) syncFocus() {
 		&m.serverMetInput,
 		&m.kadNodesDatInput,
 		&m.kadNodesInput,
+		&m.kadv6NodesDatInput,
+		&m.kadv6NodesInput,
 		&m.listenPortInput,
 		&m.udpPortInput,
+		&m.udpPortV6Input,
 		&m.peerTimeoutInput,
 		&m.timeoutInput,
 		&m.linkInput,
@@ -303,10 +330,16 @@ func (m *setupModel) syncFocus() {
 		m.kadNodesDatInput.Focus()
 	case setupFocusKADNodes:
 		m.kadNodesInput.Focus()
+	case setupFocusKADV6NodesDat:
+		m.kadv6NodesDatInput.Focus()
+	case setupFocusKADV6Nodes:
+		m.kadv6NodesInput.Focus()
 	case setupFocusListenPort:
 		m.listenPortInput.Focus()
 	case setupFocusUDPPort:
 		m.udpPortInput.Focus()
+	case setupFocusUDPPortV6:
+		m.udpPortV6Input.Focus()
 	case setupFocusPeerTimeout:
 		m.peerTimeoutInput.Focus()
 	case setupFocusTimeout:
@@ -388,11 +421,17 @@ func (m setupModel) currentConfig() (runConfig, error) {
 	cfg.serverMetPath = strings.TrimSpace(m.serverMetInput.Value())
 	cfg.kadNodesDat = strings.TrimSpace(m.kadNodesDatInput.Value())
 	cfg.kadNodes = strings.TrimSpace(m.kadNodesInput.Value())
+	cfg.kadv6NodesDat = strings.TrimSpace(m.kadv6NodesDatInput.Value())
+	cfg.kadv6Nodes = strings.TrimSpace(m.kadv6NodesInput.Value())
 	listenPort, err := parseIntField("listen port", m.listenPortInput.Value())
 	if err != nil {
 		return cfg, err
 	}
 	udpPort, err := parseIntField("udp port", m.udpPortInput.Value())
+	if err != nil {
+		return cfg, err
+	}
+	udpPortV6, err := parseIntField("udp6 port", m.udpPortV6Input.Value())
 	if err != nil {
 		return cfg, err
 	}
@@ -406,6 +445,7 @@ func (m setupModel) currentConfig() (runConfig, error) {
 	}
 	cfg.listenPort = listenPort
 	cfg.udpPort = udpPort
+	cfg.udpPortV6 = udpPortV6
 	cfg.peerTimeout = peerTimeout
 	cfg.timeout = timeout
 	if len(cfg.links) == 0 {
@@ -580,20 +620,26 @@ func (m *newTaskModel) submit() (newTaskModel, tea.Cmd) {
 }
 
 type settingsModel struct {
-	outDirInput      textinput.Model
-	serverInput      textinput.Model
-	serverMetInput   textinput.Model
-	kadNodesDatInput textinput.Model
-	kadNodesInput    textinput.Model
-	listenPortInput  textinput.Model
-	udpPortInput     textinput.Model
-	peerTimeoutInput textinput.Model
-	timeoutInput     textinput.Model
-	cfg              runConfig
-	focus            int
-	status           string
-	submitted        bool
+	outDirInput        textinput.Model
+	serverInput        textinput.Model
+	serverMetInput     textinput.Model
+	kadNodesDatInput   textinput.Model
+	kadNodesInput      textinput.Model
+	kadv6NodesDatInput textinput.Model
+	kadv6NodesInput    textinput.Model
+	listenPortInput    textinput.Model
+	udpPortInput       textinput.Model
+	udpPortV6Input     textinput.Model
+	peerTimeoutInput       textinput.Model
+	maxDownloadRateKBInput textinput.Model
+	timeoutInput           textinput.Model
+	cfg                    runConfig
+	focus                  int
+	status                 string
+	submitted              bool
 }
+
+const settingsFocusCount = 17
 
 func runSettingsTUI(initial runConfig) (runConfig, error) {
 	model := newSettingsModel(initial)
@@ -621,9 +667,13 @@ func newSettingsModel(cfg runConfig) settingsModel {
 	m.serverMetInput = newSetupInput("path/url/ed2k serverlist", cfg.serverMetPath)
 	m.kadNodesDatInput = newSetupInput("path,url,path,url", cfg.kadNodesDat)
 	m.kadNodesInput = newSetupInput("udp-host:port,udp-host:port", cfg.kadNodes)
+	m.kadv6NodesDatInput = newSetupInput("path,url,path,url", cfg.kadv6NodesDat)
+	m.kadv6NodesInput = newSetupInput("[ipv6]:port,[ipv6]:port", cfg.kadv6Nodes)
 	m.listenPortInput = newSetupInput("4661", strconv.Itoa(cfg.listenPort))
 	m.udpPortInput = newSetupInput("4662", strconv.Itoa(cfg.udpPort))
+	m.udpPortV6Input = newSetupInput("4672", strconv.Itoa(cfg.udpPortV6))
 	m.peerTimeoutInput = newSetupInput("30", strconv.Itoa(cfg.peerTimeout))
+	m.maxDownloadRateKBInput = newSetupInput("0=unlimited", strconv.Itoa(cfg.maxDownloadRateKB))
 	timeoutValue := ""
 	if cfg.timeout > 0 {
 		timeoutValue = cfg.timeout.String()
@@ -644,11 +694,11 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "tab", "down":
-			m.focus = (m.focus + 1) % 12
+			m.focus = (m.focus + 1) % settingsFocusCount
 			m.syncFocus()
 			return m, nil
 		case "shift+tab", "up":
-			m.focus = (m.focus - 1 + 12) % 12
+			m.focus = (m.focus - 1 + settingsFocusCount) % settingsFocusCount
 			m.syncFocus()
 			return m, nil
 		case " ":
@@ -660,8 +710,12 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableUPnP = !m.cfg.enableUPnP
 				return m, nil
 			}
+			if m.focus == 5 {
+				m.cfg.enableKADV6 = !m.cfg.enableKADV6
+				return m, nil
+			}
 		case "enter":
-			if m.focus == 11 {
+			if m.focus == 16 {
 				next, cmd := m.submit()
 				return next, cmd
 			}
@@ -673,7 +727,11 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableUPnP = !m.cfg.enableUPnP
 				return m, nil
 			}
-			m.focus = (m.focus + 1) % 12
+			if m.focus == 5 {
+				m.cfg.enableKADV6 = !m.cfg.enableKADV6
+				return m, nil
+			}
+			m.focus = (m.focus + 1) % settingsFocusCount
 			m.syncFocus()
 			return m, nil
 		}
@@ -687,17 +745,25 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.serverInput, cmd = m.serverInput.Update(msg)
 	case 2:
 		m.serverMetInput, cmd = m.serverMetInput.Update(msg)
-	case 5:
-		m.kadNodesDatInput, cmd = m.kadNodesDatInput.Update(msg)
 	case 6:
-		m.kadNodesInput, cmd = m.kadNodesInput.Update(msg)
+		m.kadNodesDatInput, cmd = m.kadNodesDatInput.Update(msg)
 	case 7:
-		m.listenPortInput, cmd = m.listenPortInput.Update(msg)
+		m.kadNodesInput, cmd = m.kadNodesInput.Update(msg)
 	case 8:
-		m.udpPortInput, cmd = m.udpPortInput.Update(msg)
+		m.kadv6NodesDatInput, cmd = m.kadv6NodesDatInput.Update(msg)
 	case 9:
-		m.peerTimeoutInput, cmd = m.peerTimeoutInput.Update(msg)
+		m.kadv6NodesInput, cmd = m.kadv6NodesInput.Update(msg)
 	case 10:
+		m.listenPortInput, cmd = m.listenPortInput.Update(msg)
+	case 11:
+		m.udpPortInput, cmd = m.udpPortInput.Update(msg)
+	case 12:
+		m.udpPortV6Input, cmd = m.udpPortV6Input.Update(msg)
+	case 13:
+		m.peerTimeoutInput, cmd = m.peerTimeoutInput.Update(msg)
+	case 14:
+		m.maxDownloadRateKBInput, cmd = m.maxDownloadRateKBInput.Update(msg)
+	case 15:
 		m.timeoutInput, cmd = m.timeoutInput.Update(msg)
 	}
 	return m, cmd
@@ -712,15 +778,20 @@ func (m settingsModel) View() string {
 		m.renderField(2, "Server.met", m.serverMetInput.View()),
 		m.renderToggle(3, "KAD", m.cfg.enableKAD),
 		m.renderToggle(4, "UPNP", m.cfg.enableUPnP),
-		m.renderField(5, "KAD nodes.dat", m.kadNodesDatInput.View()),
-		m.renderField(6, "KAD bootstrap", m.kadNodesInput.View()),
-		m.renderField(7, "Listen port", m.listenPortInput.View()),
-		m.renderField(8, "UDP port", m.udpPortInput.View()),
-		m.renderField(9, "Peer timeout", m.peerTimeoutInput.View()),
-		m.renderField(10, "Timeout", m.timeoutInput.View()),
-		m.renderStart(11, "[ Save settings ]"),
+		m.renderToggle(5, "KADV6", m.cfg.enableKADV6),
+		m.renderField(6, "KAD nodes.dat", m.kadNodesDatInput.View()),
+		m.renderField(7, "KAD bootstrap", m.kadNodesInput.View()),
+		m.renderField(8, "KADV6 nodes6.dat", m.kadv6NodesDatInput.View()),
+		m.renderField(9, "KADV6 bootstrap", m.kadv6NodesInput.View()),
+		m.renderField(10, "Listen port", m.listenPortInput.View()),
+		m.renderField(11, "UDP port", m.udpPortInput.View()),
+		m.renderField(12, "UDP6 port", m.udpPortV6Input.View()),
+		m.renderField(13, "Peer timeout", m.peerTimeoutInput.View()),
+		m.renderField(14, "DL rate KB/s", m.maxDownloadRateKBInput.View()),
+		m.renderField(15, "Timeout", m.timeoutInput.View()),
+		m.renderStart(16, "[ Save settings ]"),
 		"",
-		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP • Enter save • q quit"),
+		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP/KADV6 • Enter save • q quit"),
 	}
 	if strings.TrimSpace(m.status) != "" {
 		lines = append(lines, footerStyle.Render(m.status))
@@ -766,9 +837,13 @@ func (m *settingsModel) syncFocus() {
 		&m.serverMetInput,
 		&m.kadNodesDatInput,
 		&m.kadNodesInput,
+		&m.kadv6NodesDatInput,
+		&m.kadv6NodesInput,
 		&m.listenPortInput,
 		&m.udpPortInput,
+		&m.udpPortV6Input,
 		&m.peerTimeoutInput,
+		&m.maxDownloadRateKBInput,
 		&m.timeoutInput,
 	}
 	for _, input := range inputs {
@@ -781,17 +856,25 @@ func (m *settingsModel) syncFocus() {
 		m.serverInput.Focus()
 	case 2:
 		m.serverMetInput.Focus()
-	case 5:
-		m.kadNodesDatInput.Focus()
 	case 6:
-		m.kadNodesInput.Focus()
+		m.kadNodesDatInput.Focus()
 	case 7:
-		m.listenPortInput.Focus()
+		m.kadNodesInput.Focus()
 	case 8:
-		m.udpPortInput.Focus()
+		m.kadv6NodesDatInput.Focus()
 	case 9:
-		m.peerTimeoutInput.Focus()
+		m.kadv6NodesInput.Focus()
 	case 10:
+		m.listenPortInput.Focus()
+	case 11:
+		m.udpPortInput.Focus()
+	case 12:
+		m.udpPortV6Input.Focus()
+	case 13:
+		m.peerTimeoutInput.Focus()
+	case 14:
+		m.maxDownloadRateKBInput.Focus()
+	case 15:
 		m.timeoutInput.Focus()
 	}
 }
@@ -806,6 +889,8 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 	cfg.serverMetPath = strings.TrimSpace(m.serverMetInput.Value())
 	cfg.kadNodesDat = strings.TrimSpace(m.kadNodesDatInput.Value())
 	cfg.kadNodes = strings.TrimSpace(m.kadNodesInput.Value())
+	cfg.kadv6NodesDat = strings.TrimSpace(m.kadv6NodesDatInput.Value())
+	cfg.kadv6Nodes = strings.TrimSpace(m.kadv6NodesInput.Value())
 	listenPort, err := parseIntField("listen port", m.listenPortInput.Value())
 	if err != nil {
 		m.status = err.Error()
@@ -816,7 +901,17 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 		m.status = err.Error()
 		return *m, nil
 	}
+	udpPortV6, err := parseIntField("udp6 port", m.udpPortV6Input.Value())
+	if err != nil {
+		m.status = err.Error()
+		return *m, nil
+	}
 	peerTimeout, err := parseIntField("peer timeout", m.peerTimeoutInput.Value())
+	if err != nil {
+		m.status = err.Error()
+		return *m, nil
+	}
+	maxDownloadRateKB, err := parseIntField("download rate", m.maxDownloadRateKBInput.Value())
 	if err != nil {
 		m.status = err.Error()
 		return *m, nil
@@ -828,7 +923,9 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 	}
 	cfg.listenPort = listenPort
 	cfg.udpPort = udpPort
+	cfg.udpPortV6 = udpPortV6
 	cfg.peerTimeout = peerTimeout
+	cfg.maxDownloadRateKB = maxDownloadRateKB
 	cfg.timeout = timeout
 	m.cfg = cfg
 	m.submitted = true

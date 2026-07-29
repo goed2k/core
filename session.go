@@ -13,6 +13,11 @@ import (
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
+type incomingConnEntry struct {
+	conn           net.Conn
+	forceObfuscated bool
+}
+
 type Session struct {
 	mu                       sync.Mutex
 	diskMu                   sync.Mutex
@@ -20,6 +25,7 @@ type Session struct {
 	transfers                map[protocol.Hash]*Transfer
 	connections              []*PeerConnection
 	callbacks                map[int32]protocol.Hash
+	callbackCooldown         map[int32]int64
 	settings                 Settings
 	lastTick                 int64
 	accumulator              Statistics
@@ -33,12 +39,15 @@ type Session struct {
 	diskTasks                []*diskTask
 	diskResults              chan diskTaskResult
 	listener                 *net.TCPListener
-	incomingConns            chan net.Conn
+	obfListener              *net.TCPListener
+	incomingConns            chan incomingConnEntry
 	dhtTracker               *DHTTracker
+	dhtv6Tracker             *KADV6Tracker
 	upnp                     *upnpManager
 	uploadQueue              *UploadQueue
 	credits                  *PeerCreditManager
 	friendSlots              map[string]bool
+	downloadLimiter          *downloadRateLimiter
 	activeSearch             *searchTask
 	nextSearchID             uint32
 	lastKadPublishEndpoint   protocol.Endpoint
@@ -46,11 +55,14 @@ type Session struct {
 	sharedStore              *SharedStore
 	sharedDirs               []string
 	serverMetMeta     map[string]serverMetEntryMeta
-	globUDPChallenge  map[uint32]string
+	globUDPChallenge  map[uint32]globUDPChallengeEntry
 	udpServerStats    map[string]serverUDPStats
 	serverStatUDPConn *net.UDPConn
 	serverStatUDPStop chan struct{}
 	listenPortWasDynamic bool
+	identity          *IdentityState
+	ipFilter          *IPFilter
+	bannedPeers       map[string]protocol.Endpoint
 }
 
 type serverMetEntryMeta struct {
@@ -83,6 +95,7 @@ func NewSession(st Settings) *Session {
 		transfers:              make(map[protocol.Hash]*Transfer),
 		connections:            make([]*PeerConnection, 0),
 		callbacks:              make(map[int32]protocol.Hash),
+		callbackCooldown:       make(map[int32]int64),
 		settings:               st,
 		lastTick:               CurrentTime(),
 		accumulator:            NewStatistics(),
@@ -91,9 +104,10 @@ func NewSession(st Settings) *Session {
 		configuredServers:      make(map[string]*net.TCPAddr),
 		diskTasks:              make([]*diskTask, 0),
 		diskResults:            make(chan diskTaskResult, 128),
-		incomingConns:          make(chan net.Conn, 32),
+		incomingConns:          make(chan incomingConnEntry, 32),
 		credits:                NewPeerCreditManager(),
 		friendSlots:            make(map[string]bool),
+		downloadLimiter:        newDownloadRateLimiter(st.MaxDownloadRateKB),
 		sharedStore:            NewSharedStore(),
 		sharedDirs:             make([]string, 0),
 	}
@@ -115,6 +129,25 @@ func (s *Session) ConfigureSession(st Settings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.settings = st
+	if s.credits != nil {
+		s.credits.SetCreditsOnlyVerified(st.CreditsOnlyVerified)
+	}
+	if s.downloadLimiter != nil {
+		s.downloadLimiter.setRateKB(st.MaxDownloadRateKB)
+	}
+}
+
+func (s *Session) ThrottleDownload(bytes int) {
+	if s == nil || bytes <= 0 {
+		return
+	}
+	if s.settings.MaxDownloadRateKB <= 0 {
+		return
+	}
+	if s.downloadLimiter == nil {
+		s.downloadLimiter = newDownloadRateLimiter(s.settings.MaxDownloadRateKB)
+	}
+	s.downloadLimiter.wait(bytes)
 }
 
 func (s *Session) AddTransfer(hash protocol.Hash, size int64, file *os.File) (TransferHandle, error) {
@@ -344,7 +377,7 @@ func (s *Session) RequestSourcesNow(transfer *Transfer) bool {
 func (s *Session) ConnectNewPeers() {
 	stepsSinceLastConnect := 0
 	maxConnectionsPerSecond := s.settings.MaxConnectionsPerSecond
-	transfers := s.snapshotTransfers()
+	transfers := sortTransfersByDownloadPriority(s.snapshotTransfers())
 	connections := s.snapshotConnections()
 	numTransfers := len(transfers)
 	enumerateCandidates := true
@@ -404,18 +437,66 @@ func (s *Session) Listen() error {
 				return
 			}
 			select {
-			case s.incomingConns <- conn:
+			case s.incomingConns <- incomingConnEntry{conn: conn}:
 			default:
 				_ = conn.Close()
 			}
 		}
 	}(listener)
+	if err := s.listenObfuscationPort(); err != nil {
+		return err
+	}
 	s.startUPnPMapping()
 	return nil
 }
 
+func (s *Session) listenObfuscationPort() error {
+	if s.obfListener != nil {
+		return nil
+	}
+	s.mu.Lock()
+	port := s.obfuscationListenPortLocked()
+	s.mu.Unlock()
+	if port <= 0 {
+		return nil
+	}
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: port})
+	if err != nil {
+		return err
+	}
+	s.obfListener = listener
+	go func(l *net.TCPListener) {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			select {
+			case s.incomingConns <- incomingConnEntry{conn: conn, forceObfuscated: true}:
+			default:
+				_ = conn.Close()
+			}
+		}
+	}(listener)
+	return nil
+}
+
+func (s *Session) obfuscationListenPortLocked() int {
+	if s.settings.ObfuscationTCPPort > 0 {
+		return s.settings.ObfuscationTCPPort
+	}
+	if s.settings.ListenPort > 0 {
+		return s.settings.ListenPort + 3
+	}
+	return 0
+}
+
 func (s *Session) CloseListener() {
 	s.stopUPnPMapping()
+	if s.obfListener != nil {
+		_ = s.obfListener.Close()
+		s.obfListener = nil
+	}
 	if s.listener == nil {
 		return
 	}
@@ -524,12 +605,12 @@ func (s *Session) PumpIO() {
 func (s *Session) acceptIncomingConnections() {
 	for {
 		select {
-		case conn := <-s.incomingConns:
-			if conn == nil {
+		case entry := <-s.incomingConns:
+			if entry.conn == nil {
 				continue
 			}
 			s.mu.Lock()
-			s.connections = append(s.connections, NewIncomingPeerConnection(s, conn))
+			s.connections = append(s.connections, NewIncomingPeerConnection(s, entry.conn, entry.forceObfuscated))
 			s.mu.Unlock()
 		default:
 			return
@@ -557,6 +638,7 @@ func (s *Session) ConnectTo(identifier string, address *net.TCPAddr) error {
 	s.serverConnections[identifier] = sc
 	s.promotePrimaryServer(sc)
 	s.mu.Unlock()
+	s.ProbeServerPing(identifier, address)
 	return sc.Connect()
 }
 
@@ -871,6 +953,25 @@ func (s *Session) diskTaskCount() int {
 	return len(s.diskTasks)
 }
 
+func (s *Session) SyncDHTv6ListenPort() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dhtv6Tracker == nil {
+		return
+	}
+	if port := s.dhtv6Tracker.ListenPort(); port > 0 {
+		s.settings.UDPPortV6 = port
+	}
+}
+
+func (s *Session) SetDHTv6Tracker(tracker *KADV6Tracker) {
+	s.dhtv6Tracker = tracker
+}
+
+func (s *Session) GetDHTv6Tracker() *KADV6Tracker {
+	return s.dhtv6Tracker
+}
+
 func (s *Session) SetDHTTracker(tracker *DHTTracker) {
 	s.dhtTracker = tracker
 	if tracker != nil {
@@ -896,7 +997,38 @@ func (s *Session) Credits() *PeerCreditManager {
 	if s.credits == nil {
 		s.credits = NewPeerCreditManager()
 	}
+	s.credits.SetCreditsOnlyVerified(s.settings.CreditsOnlyVerified)
 	return s.credits
+}
+
+func (s *Session) Identity() *IdentityState {
+	if s == nil {
+		return nil
+	}
+	return s.identity
+}
+
+func (s *Session) SetIdentity(id *IdentityState) {
+	if s == nil {
+		return
+	}
+	s.identity = id
+}
+
+func (s *Session) LoadIdentity(path string) error {
+	if s == nil {
+		return errors.New("session is nil")
+	}
+	id, err := LoadIdentityState(path)
+	if err != nil {
+		return err
+	}
+	if !s.settings.UserAgent.Equal(protocol.Invalid) {
+		id.LinkUserHash(s.settings.UserAgent)
+	}
+	s.identity = id
+	s.settings.IdentityKeyPath = path
+	return nil
 }
 
 func (s *Session) SetFriendSlot(hash protocol.Hash, enabled bool) {
@@ -1022,7 +1154,13 @@ func (s *Session) connectConfiguredServers(currentSessionTime int64) {
 		configured[identifier] = address
 	}
 	s.mu.Unlock()
-	for identifier, address := range configured {
+	identifiers := make([]string, 0, len(configured))
+	for identifier := range configured {
+		identifiers = append(identifiers, identifier)
+	}
+	sortServerIdentifiersByPing(s, identifiers, currentSessionTime)
+	for _, identifier := range identifiers {
+		address := configured[identifier]
 		if identifier == "" || address == nil {
 			continue
 		}

@@ -113,6 +113,17 @@ func (n *kadNodeImpl) searchKeywords(hash protocol.Hash, cb func([]kadproto.Sear
 	return t.start()
 }
 
+func (n *kadNodeImpl) searchNotes(hash protocol.Hash, cb func([]kadproto.SearchEntry)) bool {
+	if n == nil || n.tracker == nil || cb == nil {
+		return false
+	}
+	t := newKadTraversal(n, kadproto.NewID(hash), kadTraversalFindNotes, 0, cb)
+	for _, node := range n.tracker.closestNodesLocked(kadproto.NewID(hash), 50, true) {
+		t.addNode(node.Addr, node.ID, node.TCPPort, node.Version)
+	}
+	return t.start()
+}
+
 func (n *kadNodeImpl) refresh(target kadproto.ID) bool {
 	t := newKadTraversal(n, target, kadTraversalRefresh, 0, nil)
 	for _, node := range n.tracker.closestNodesLocked(target, 50, true) {
@@ -156,14 +167,14 @@ func (n *kadNodeImpl) tick() {
 		if tx == nil || tx.observer == nil {
 			continue
 		}
-		tx.observer.shortTimeout()
+		rpcObserverShortTimeout(tx.observer)
 	}
 	for _, tx := range expired {
 		if tx == nil {
 			continue
 		}
 		if tx.observer != nil {
-			tx.observer.timeout()
+			rpcObserverTimeout(tx.observer)
 			continue
 		}
 		node := n.tracker.nodes[tx.endpointKey]
@@ -192,6 +203,12 @@ func (n *kadNodeImpl) tick() {
 	if live >= 5 && (n.tracker.lastFirewalledCheck.IsZero() || now.Sub(n.tracker.lastFirewalledCheck) >= time.Hour) {
 		n.tracker.lastFirewalledCheck = now
 		n.firewalled()
+	}
+	if n.tracker.firewalled && live >= 1 {
+		if n.tracker.lastFindBuddy.IsZero() || now.Sub(n.tracker.lastFindBuddy) >= time.Minute {
+			n.tracker.lastFindBuddy = now
+			n.sendFindBuddyReq()
+		}
 	}
 	if live == 0 && len(n.tracker.nodes) > 0 && n.tracker.table.NeedBootstrap(now) {
 		n.tracker.lastBootstrap = now
@@ -249,13 +266,17 @@ func (n *kadNodeImpl) processFindRes(addr *net.UDPAddr, res kadproto.Res) {
 	target := res.Target.Hash
 	tx := n.tracker.rpc.Incoming(addr, kadproto.ResOp, &target)
 	n.tracker.handleFindResponse(addr, res)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
+		return
+	}
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
 		return
 	}
 	for _, entry := range res.Results {
-		tx.observer.traversal.traverse(udpAddrFromKad(entry.Endpoint), entry.ID, entry.Endpoint.TCPPort, entry.Version)
+		observer.traversal.traverse(udpAddrFromKad(entry.Endpoint), entry.ID, entry.Endpoint.TCPPort, entry.Version)
 	}
-	tx.observer.done()
+	observer.done()
 }
 
 func (n *kadNodeImpl) processBootstrapReq(addr *net.UDPAddr) {
@@ -271,13 +292,17 @@ func (n *kadNodeImpl) processBootstrapRes(addr *net.UDPAddr, res kadproto.Bootst
 	}
 	tx := n.tracker.rpc.Incoming(addr, kadproto.BootstrapResOp, nil)
 	n.tracker.handleBootstrapResponse(addr, res)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
+		return
+	}
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
 		return
 	}
 	for _, contact := range res.Contacts {
-		tx.observer.traversal.traverse(udpAddrFromKad(contact.Endpoint), contact.ID, contact.Endpoint.TCPPort, contact.Version)
+		observer.traversal.traverse(udpAddrFromKad(contact.Endpoint), contact.ID, contact.Endpoint.TCPPort, contact.Version)
 	}
-	tx.observer.done()
+	observer.done()
 }
 
 func (n *kadNodeImpl) processPublishKeysReq(addr *net.UDPAddr, req kadproto.PublishKeysReq) {
@@ -340,11 +365,15 @@ func (n *kadNodeImpl) processFirewalledRes(addr *net.UDPAddr, res kadproto.Firew
 	}
 	tx := n.tracker.rpc.Incoming(addr, kadproto.FirewalledResOp, nil)
 	n.tracker.handleFirewalledResponse(addr, res)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
 		return
 	}
-	tx.observer.externalIP = res.IP
-	tx.observer.done()
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
+		return
+	}
+	observer.externalIP = res.IP
+	observer.done()
 }
 
 func (n *kadNodeImpl) processSearchKeysReq(addr *net.UDPAddr, req kadproto.SearchKeysReq) {
@@ -367,11 +396,15 @@ func (n *kadNodeImpl) processSearchRes(addr *net.UDPAddr, res kadproto.SearchRes
 	}
 	target := res.Target.Hash
 	tx := n.tracker.rpc.Incoming(addr, kadproto.SearchResOp, &target)
-	if tx == nil || tx.observer == nil {
+	if tx == nil {
 		return
 	}
-	tx.observer.entries = append(tx.observer.entries, res.Results...)
-	tx.observer.processedResponses++
+	observer, ok := tx.observer.(*kadObserver)
+	if !ok || observer == nil {
+		return
+	}
+	observer.entries = append(observer.entries, res.Results...)
+	observer.processedResponses++
 }
 
 func (n *kadNodeImpl) processPong(addr *net.UDPAddr, pong kadproto.Pong) {
@@ -427,4 +460,74 @@ func (n *kadNodeImpl) processAddresses(addresses []uint32) {
 		}
 	}
 	n.tracker.firewalled = matchCount != 2
+	if n.tracker.firewalled {
+		n.tryCallbackBootstrap()
+	}
+}
+
+func (n *kadNodeImpl) tryCallbackBootstrap() {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	now := time.Now()
+	if !n.tracker.lastCallbackTry.IsZero() && now.Sub(n.tracker.lastCallbackTry) < time.Minute {
+		return
+	}
+	n.tracker.lastCallbackTry = now
+	nodes := n.tracker.closestNodesLocked(n.tracker.selfID, 3, true)
+	for _, node := range nodes {
+		if node != nil && node.Addr != nil {
+			_, _ = n.tracker.writePacket(node.Addr, kadproto.CallbackReq{})
+		}
+	}
+}
+
+func (n *kadNodeImpl) sendFindBuddyReq() {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	nodes := n.tracker.closestNodesLocked(n.tracker.selfID, 3, true)
+	for _, node := range nodes {
+		if node != nil && node.Addr != nil {
+			_, _ = n.tracker.writePacket(node.Addr, kadproto.FindBuddyReq{})
+		}
+	}
+}
+
+func (n *kadNodeImpl) processCallbackReq(addr *net.UDPAddr) {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	n.tracker.mu.Lock()
+	if node := n.tracker.nodes[addr.String()]; node != nil {
+		n.tracker.confirmNodeLocked(node)
+	}
+	n.tracker.mu.Unlock()
+	_, _ = n.tracker.writePacket(addr, kadproto.Pong{UDPPort: uint16(n.tracker.ListenPort())})
+}
+
+func (n *kadNodeImpl) processFindBuddyReq(addr *net.UDPAddr) {
+	if n == nil || n.tracker == nil {
+		return
+	}
+	n.tracker.mu.Lock()
+	firewalled := n.tracker.firewalled
+	n.tracker.mu.Unlock()
+	if firewalled {
+		return
+	}
+	_, _ = n.tracker.writePacket(addr, kadproto.FindBuddyRes{})
+}
+
+func (n *kadNodeImpl) processFindBuddyRes(addr *net.UDPAddr) {
+	if n == nil || n.tracker == nil || addr == nil {
+		return
+	}
+	n.tracker.mu.Lock()
+	defer n.tracker.mu.Unlock()
+	node := n.tracker.nodes[addr.String()]
+	if node != nil && node.KnownID() {
+		n.tracker.buddyHash = node.ID.Hash
+		n.tracker.buddyAddr = addr
+	}
 }

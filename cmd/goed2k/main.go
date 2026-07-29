@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,30 +20,41 @@ const (
 )
 
 type runConfig struct {
-	links         []string
-	outDir        string
-	serverAddr    string
-	serverMetPath string
-	listenPort    int
-	udpPort       int
-	enableKAD     bool
-	enableUPnP    bool
-	kadNodesDat   string
-	kadNodes      string
-	peerTimeout   int
-	timeout       time.Duration
+	links          []string
+	outDir         string
+	serverAddr     string
+	serverMetPath  string
+	listenPort     int
+	udpPort        int
+	udpPortV6      int
+	enableKAD      bool
+	enableKADV6    bool
+	enableUPnP     bool
+	kadNodesDat    string
+	kadNodes       string
+	kadv6NodesDat  string
+	kadv6Nodes     string
+	peerTimeout       int
+	maxDownloadRateKB int
+	timeout           time.Duration
 }
 
 type appContext struct {
-	client      *ed2k.Client
-	targetPaths []string
-	includeDHT  bool
-	deadline    time.Time
-	noticeCh    chan string
+	client       *ed2k.Client
+	targetPaths  []string
+	includeDHT   bool
+	includeDHTv6 bool
+	deadline     time.Time
+	noticeCh     chan string
 }
 
 func main() {
 	cfg := defaultRunConfig()
+	flag.BoolVar(&cfg.enableKADV6, "kadv6", cfg.enableKADV6, "enable KADV6 IPv6 DHT")
+	flag.IntVar(&cfg.udpPortV6, "udp-port-v6", cfg.udpPortV6, "KADV6 UDP listen port")
+	flag.StringVar(&cfg.kadv6NodesDat, "kadv6-nodes-dat", cfg.kadv6NodesDat, "KADV6 nodes6.dat path or URL")
+	flag.StringVar(&cfg.kadv6Nodes, "kadv6-bootstrap", cfg.kadv6Nodes, "KADV6 bootstrap nodes")
+	flag.Parse()
 
 	app, err := setupClient(cfg)
 	if err != nil {
@@ -68,7 +80,9 @@ func defaultRunConfig() runConfig {
 		serverMetPath: defaultServerMet,
 		listenPort:    4661,
 		udpPort:       4662,
+		udpPortV6:     4672,
 		enableKAD:     true,
+		enableKADV6:   false,
 		enableUPnP:    true,
 		kadNodesDat:   defaultNodesDat,
 		peerTimeout:   30,
@@ -96,23 +110,30 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	settings.ReconnectToServer = true
 	settings.ListenPort = cfg.listenPort
 	settings.UDPPort = cfg.udpPort
+	settings.UDPPortV6 = cfg.udpPortV6
 	settings.EnableDHT = cfg.enableKAD
+	settings.EnableDHTv6 = cfg.enableKADV6
 	settings.EnableUPnP = cfg.enableUPnP
 	settings.PeerConnectionTimeout = cfg.peerTimeout
+	settings.MaxDownloadRateKB = cfg.maxDownloadRateKB
 
 	client := ed2k.NewClient(settings)
 	if cfg.enableKAD {
 		client.EnableDHT()
+	}
+	if cfg.enableKADV6 {
+		client.EnableDHTv6()
 	}
 	if err := client.Start(); err != nil {
 		return nil, fmt.Errorf("listen failed on port %d: %w", settings.ListenPort, err)
 	}
 
 	app := &appContext{
-		client:      client,
-		targetPaths: nil,
-		includeDHT:  cfg.enableKAD,
-		noticeCh:    make(chan string, 32),
+		client:       client,
+		targetPaths:  nil,
+		includeDHT:   cfg.enableKAD,
+		includeDHTv6: cfg.enableKADV6,
+		noticeCh:     make(chan string, 32),
 	}
 	if cfg.timeout > 0 {
 		app.deadline = time.Now().Add(cfg.timeout)
@@ -142,6 +163,20 @@ func startBackgroundBootstrap(app *appContext, cfg runConfig) {
 		go func() {
 			if err := app.client.AddDHTBootstrapNodes(cfg.kadNodes); err != nil {
 				app.notify("KAD bootstrap nodes ignored: %v", err)
+			}
+		}()
+	}
+	if cfg.enableKADV6 && cfg.kadv6NodesDat != "" {
+		go func() {
+			if err := app.client.LoadDHTv6NodesDat(cfg.kadv6NodesDat); err != nil {
+				app.notify("KADV6 nodes6.dat unavailable: %v", err)
+			}
+		}()
+	}
+	if cfg.enableKADV6 && cfg.kadv6Nodes != "" {
+		go func() {
+			if err := app.client.AddDHTv6BootstrapNodes(cfg.kadv6Nodes); err != nil {
+				app.notify("KADV6 bootstrap nodes ignored: %v", err)
 			}
 		}()
 	}

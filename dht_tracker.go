@@ -36,6 +36,10 @@ type DHTTracker struct {
 	firewalled          bool
 	externalIPs         []uint32
 	storagePoint        *net.UDPAddr
+	buddyHash           protocol.Hash
+	buddyAddr           *net.UDPAddr
+	lastFindBuddy       time.Time
+	lastCallbackTry     time.Time
 }
 
 func NewDHTTracker(listenPort int, timeout time.Duration) *DHTTracker {
@@ -274,7 +278,13 @@ func (t *DHTTracker) readLoop() {
 			t.node.processFirewalledUDP(addr, *(message.(*kadproto.FirewalledUDP)))
 		case kadproto.SearchNotesReqOp:
 			t.node.processSearchNotesReq(addr, *(message.(*kadproto.SearchNotesReq)))
-		case kadproto.SearchNotesResOp, kadproto.HelloResAckOp, kadproto.PublishResAckOp, kadproto.CallbackReqOp, kadproto.FindBuddyReqOp, kadproto.FindBuddyResOp:
+		case kadproto.CallbackReqOp:
+			t.node.processCallbackReq(addr)
+		case kadproto.FindBuddyReqOp:
+			t.node.processFindBuddyReq(addr)
+		case kadproto.FindBuddyResOp:
+			t.node.processFindBuddyRes(addr)
+		case kadproto.SearchNotesResOp, kadproto.HelloResAckOp, kadproto.PublishResAckOp:
 			continue
 		}
 	}
@@ -470,7 +480,7 @@ func (t *DHTTracker) maybeSendHelloLocked(node *KadRoutingNode) {
 	node.HelloSent = true
 	t.writePacketLocked(node.Addr, kadproto.Hello{
 		ID:      t.selfID,
-		TCPPort: uint16(t.ListenPort()),
+		TCPPort: uint16(t.listenPort),
 		Version: kadproto.KademliaVersion,
 	}, kadproto.HelloReqOp)
 	t.rpc.Invoke(&kadRPCTransaction{endpointKey: node.Addr.String(), opcode: kadproto.HelloResOp})
@@ -591,6 +601,22 @@ func (t *DHTTracker) SearchKeywords(hash protocol.Hash, cb func([]kadproto.Searc
 	}
 	t.mu.Unlock()
 	return t.node.searchKeywords(hash, cb)
+}
+
+func (t *DHTTracker) SearchNotes(hash protocol.Hash, cb func([]kadproto.SearchEntry)) bool {
+	if cb == nil {
+		return false
+	}
+	if err := t.Start(); err != nil {
+		return false
+	}
+	t.mu.Lock()
+	if len(t.nodes) == 0 && len(t.table.RouterNodes()) == 0 {
+		t.mu.Unlock()
+		return false
+	}
+	t.mu.Unlock()
+	return t.node.searchNotes(hash, cb)
 }
 
 func (t *DHTTracker) SetStoragePoint(addr *net.UDPAddr) {

@@ -38,6 +38,27 @@ func (s *ServerConnection) Connect() error {
 	if s.address == nil {
 		return NewError(InternalError)
 	}
+	settings := s.session.settings
+	if settings.EnableCryptLayer && s.obfuscationTCPPort > 0 {
+		obfAddr := cloneTCPAddr(s.address)
+		obfAddr.Port = int(s.obfuscationTCPPort)
+		conn, err := net.DialTCP("tcp", nil, obfAddr)
+		if err == nil {
+			obfConn, obfErr := NewOutgoingServerObfuscatedConn(conn)
+			if obfErr == nil {
+				s.socket = obfConn
+				s.SendLoginRequest()
+				return nil
+			}
+			_ = conn.Close()
+		}
+		if settings.CryptLayerRequired {
+			if err != nil {
+				return err
+			}
+			return errObfuscationHandshake
+		}
+	}
 	if err := s.Connection.Connect(s.address); err != nil {
 		return err
 	}
@@ -154,13 +175,24 @@ func (s *ServerConnection) ProcessIncoming() error {
 			debugPeerf("server %s <- FoundFileSources hash=%s count=%d", s.identifier, value.Hash.String(), len(value.Sources))
 			if transfer := s.session.LookupTransfer(value.Hash); transfer != nil {
 				for _, ep := range value.Sources {
-					if !IsLowID(ep.IP()) {
+					if IsLowID(ep.IP()) {
+						peer := NewPeerWithSource(protocol.Endpoint{}, true, int(PeerServer))
+						peer.ServerClientID = ep.IP()
+						if transfer.session != nil {
+							transfer.session.mu.Lock()
+						}
+						_, _ = transfer.policy.AddPeer(peer)
+						if transfer.session != nil {
+							transfer.session.mu.Unlock()
+						}
+					} else {
 						_ = transfer.AddPeer(ep, int(PeerServer))
 					}
 				}
 			}
 		case *serverproto.CallbackRequestIncoming:
-			debugPeerf("server %s <- CallbackRequestIncoming", s.identifier)
+			debugPeerf("server %s <- CallbackRequestIncoming point=%s", s.identifier, value.Point.String())
+			s.session.OnCallbackRequestIncoming(value.Point)
 		case *serverproto.CallbackRequestFailed:
 			debugPeerf("server %s <- CallbackRequestFailed", s.identifier)
 		case *serverproto.Status:

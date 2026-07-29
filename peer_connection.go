@@ -3,6 +3,8 @@ package goed2k
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -102,14 +104,16 @@ func (m *MiscOptions2) SetLargeFiles()             { m.Value |= 1 << largeFileOf
 func (m *MiscOptions2) Assign(value int)           { m.Value = value }
 
 type RemotePeerInfo struct {
-	Point      protocol.Endpoint
-	NickName   string
-	ModName    string
-	Version    int
-	ModVersion string
-	ModNumber  int
-	Misc1      MiscOptions
-	Misc2      MiscOptions2
+	Point             protocol.Endpoint
+	NickName          string
+	ModName           string
+	Version           int
+	ModVersion        string
+	ModNumber         int
+	Misc1             MiscOptions
+	Misc2             MiscOptions2
+	SecIdentVersion int
+	SecIdentKeyFP   uint32
 }
 
 type PendingBlock struct {
@@ -162,6 +166,16 @@ type PeerConnection struct {
 	friendSlot         bool
 	uploadResource     UploadableResource
 	sourceExchangeSent bool
+	pendingAICHPiece   int
+	identityVerified   bool
+	remotePubKey       []byte
+	remoteChallenge    uint32
+	ourChallenge       uint32
+	remoteSecIdentVer int
+	remoteKeyFP        uint32
+	helloInfoFlags     byte
+	remoteFileRating   byte
+	remoteFileComment  string
 }
 
 func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Transfer, peerInfo *Peer) *PeerConnection {
@@ -176,10 +190,11 @@ func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Tran
 		downloadQueue:  make([]PendingBlock, 0),
 		uploadBlocks:   make([]RequestedUploadBlock, 0),
 		uploadDone:     make([]RequestedUploadBlock, 0),
+		pendingAICHPiece: -1,
 	}
 }
 
-func NewIncomingPeerConnection(session *Session, conn net.Conn) *PeerConnection {
+func NewIncomingPeerConnection(session *Session, conn net.Conn, forceObfuscated bool) *PeerConnection {
 	pc := &PeerConnection{
 		Connection:     NewConnection(session),
 		speed:          PeerSpeedSlow,
@@ -188,8 +203,13 @@ func NewIncomingPeerConnection(session *Session, conn net.Conn) *PeerConnection 
 		downloadQueue:  make([]PendingBlock, 0),
 		uploadBlocks:   make([]RequestedUploadBlock, 0),
 		uploadDone:     make([]RequestedUploadBlock, 0),
+		pendingAICHPiece: -1,
 	}
-	pc.socket = conn
+	if forceObfuscated || session.settings.EnableCryptLayer || session.settings.CryptLayerRequired {
+		pc.socket = WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), forceObfuscated, session.settings.CryptLayerRequired)
+	} else {
+		pc.socket = conn
+	}
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		pc.endpoint = protocol.EndpointFromInet(tcpAddr)
 	}
@@ -213,6 +233,34 @@ func (p *PeerConnection) Connect() error {
 	}
 	if err != nil {
 		return err
+	}
+	settings := p.session.settings
+	useObf := peerWantsObfuscation(p.peerInfo, settings)
+	if useObf {
+		if peerHash, ok := peerProvidesUserHash(p.peerInfo); ok {
+			if obfAddr := obfuscationDialAddr(addr, settings); obfAddr != nil {
+				addr = obfAddr
+			}
+			conn, err := net.DialTCP("tcp", nil, addr)
+			if err != nil {
+				if settings.CryptLayerRequired {
+					return err
+				}
+			} else {
+				obfConn, obfErr := NewOutgoingClientObfuscatedConn(conn, peerHash)
+				if obfErr == nil {
+					p.socket = obfConn
+					p.OnConnect()
+					return nil
+				}
+				_ = conn.Close()
+				if settings.CryptLayerRequired {
+					return obfErr
+				}
+			}
+		} else if settings.CryptLayerRequired {
+			return errObfuscationRequired
+		}
 	}
 	if err := p.Connection.Connect(addr); err != nil {
 		return err
@@ -346,6 +394,7 @@ func (p *PeerConnection) IsUploadLowID() bool {
 func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 	const clientSoftwareAMule = 3
 	mo := MiscOptions{
+		AICHVersion:        1,
 		UnicodeSupport:     1,
 		DataCompVer:        p.session.GetCompressionVersion(),
 		SourceExchange1Ver: 1,
@@ -355,6 +404,9 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 	mo2.SetCaptcha()
 	mo2.SetLargeFiles()
 	mo2.SetSourceExt2()
+	if p.session.settings.EnableSecIdent && p.session.Identity().Available() {
+		mo.SupportSecIdent = 1
+	}
 	return clientproto.HelloAnswer{
 		Hash:  p.session.GetUserAgent(),
 		Point: protocol.NewEndpoint(p.session.GetClientID(), p.session.GetListenPort()),
@@ -385,24 +437,42 @@ func (p *PeerConnection) OnConnect() {
 	}
 }
 
-func (p *PeerConnection) SendExtHelloAnswer() {
-	packet := clientproto.ExtHelloAnswer{
-		ExtendedHandshake: clientproto.ExtendedHandshake{
-			Version:         0x10,
-			ProtocolVersion: 0x01,
-			Properties: protocol.TagList{
-				protocol.NewUInt32Tag(0x20, 0),
-				protocol.NewUInt32Tag(0x21, 0),
-				protocol.NewUInt32Tag(0x22, 0),
-				protocol.NewUInt32Tag(0x23, 0),
-				protocol.NewUInt32Tag(0x24, 0),
-				protocol.NewUInt32Tag(0x25, 0),
-				protocol.NewUInt32Tag(0x26, 0x03),
-				protocol.NewUInt32Tag(0x27, 0),
-				protocol.NewUInt32Tag(0x55, uint32(p.session.settings.Version)),
-			},
-		},
+func (p *PeerConnection) buildExtendedHandshake() clientproto.ExtendedHandshake {
+	props := protocol.TagList{
+		protocol.NewUInt32Tag(0x20, 0),
+		protocol.NewUInt32Tag(0x21, 0),
+		protocol.NewUInt32Tag(0x22, 0),
+		protocol.NewUInt32Tag(0x23, 0),
+		protocol.NewUInt32Tag(0x24, 0),
+		protocol.NewUInt32Tag(0x25, 0),
+		protocol.NewUInt32Tag(0x26, 0x03),
+		protocol.NewUInt32Tag(0x27, 0),
+		protocol.NewUInt32Tag(0x55, uint32(p.session.settings.Version)),
 	}
+	if p.session.settings.EnableSecIdent {
+		if id := p.session.Identity(); id != nil && id.Available() {
+			props = append(props,
+				protocol.NewUInt32Tag(extTagSecIdentVersion, uint32(id.Version)),
+				protocol.NewUInt32Tag(extTagSecIdentKeyFP, id.Fingerprint()),
+			)
+		}
+	}
+	return clientproto.ExtendedHandshake{
+		Version:         0x10,
+		ProtocolVersion: 0x01,
+		Properties:      props,
+	}
+}
+
+func (p *PeerConnection) SendExtHello() {
+	packet := clientproto.ExtHello{ExtendedHandshake: p.buildExtendedHandshake()}
+	if raw, err := p.combiner.Pack("client.ExtHello", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendExtHelloAnswer() {
+	packet := clientproto.ExtHelloAnswer{ExtendedHandshake: p.buildExtendedHandshake()}
 	if raw, err := p.combiner.Pack("client.ExtHelloAnswer", &packet); err == nil {
 		p.QueuePacket(raw)
 	}
@@ -472,6 +542,61 @@ func (p *PeerConnection) SendHashSetAnswer(res UploadableResource) {
 	if raw, err := p.combiner.Pack("client.HashSetAnswer", &packet); err == nil {
 		p.QueuePacket(raw)
 	}
+}
+
+func (p *PeerConnection) SendAICHRequest(hash protocol.Hash, requested []protocol.AICHHash) {
+	if len(requested) == 0 {
+		return
+	}
+	debugPeerf("peer %s -> AICHRequest hashes=%d", p.endpoint.String(), len(requested))
+	packet := clientproto.AICHRequest{Hash: hash, Hashes: requested}
+	if raw, err := p.combiner.Pack("client.AICHRequest", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendAICHAnswer(res UploadableResource, requested []protocol.AICHHash) {
+	if res == nil || len(requested) == 0 {
+		return
+	}
+	answered := res.UploadAICHHashes(requested)
+	if len(answered) == 0 {
+		return
+	}
+	packet := clientproto.AICHAnswer{Hash: res.GetHash(), Hashes: answered}
+	if raw, err := p.combiner.Pack("client.AICHAnswer", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendAICHFileHashAnswer(res UploadableResource) {
+	if res == nil {
+		return
+	}
+	root, ok := res.AICHRootHash()
+	if !ok {
+		return
+	}
+	packet := clientproto.AICHFileHashAnswer{Hash: res.GetHash(), RootHash: root}
+	if raw, err := p.combiner.Pack("client.AICHFileHashAnswer", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendAICHRequestForPiece(t *Transfer, pieceIndex int) {
+	if p == nil || t == nil || pieceIndex < 0 {
+		return
+	}
+	if _, ok := t.AICHRootHash(); !ok {
+		return
+	}
+	p.pendingAICHPiece = pieceIndex
+	blockCount := AICHBlockCount(t.pieceSize(pieceIndex))
+	requested := make([]protocol.AICHHash, blockCount)
+	for i := range requested {
+		requested[i] = AICHRequestMarker(pieceIndex, i)
+	}
+	p.SendAICHRequest(t.GetHash(), requested)
 }
 
 func (p *PeerConnection) SendStartUpload(hash protocol.Hash) {
@@ -546,7 +671,7 @@ func (p *PeerConnection) SendPart(begin, end int64, payload []byte) error {
 			return err
 		}
 		p.QueuePacketWithStats(raw, int64(protoSize), int64(len(payload)))
-		p.session.Credits().AddUploaded(p.remoteHash, int64(len(payload)))
+		p.session.Credits().AddUploaded(p.remoteHash, int64(len(payload)), p.identityVerified)
 		return nil
 	}
 	packet := clientproto.SendingPart64{
@@ -559,7 +684,98 @@ func (p *PeerConnection) SendPart(begin, end int64, payload []byte) error {
 		return err
 	}
 	p.QueuePacketWithStats(raw, int64(protoSize), int64(len(payload)))
-	p.session.Credits().AddUploaded(p.remoteHash, int64(len(payload)))
+	p.session.Credits().AddUploaded(p.remoteHash, int64(len(payload)), p.identityVerified)
+	return nil
+}
+
+func (p *PeerConnection) canCompressToPeer() bool {
+	if p == nil || p.session == nil {
+		return false
+	}
+	version := p.session.GetCompressionVersion()
+	if version <= 0 {
+		return false
+	}
+	return p.remotePeerInfo.Misc1.DataCompVer == version
+}
+
+func tryCompressPayload(payload []byte) ([]byte, bool) {
+	if len(payload) == 0 {
+		return nil, false
+	}
+	var buf bytes.Buffer
+	writer, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
+	if err != nil {
+		return nil, false
+	}
+	if _, err := writer.Write(payload); err != nil {
+		return nil, false
+	}
+	if err := writer.Close(); err != nil {
+		return nil, false
+	}
+	compressed := buf.Bytes()
+	if len(compressed) >= len(payload) {
+		return nil, false
+	}
+	return compressed, true
+}
+
+func (p *PeerConnection) SendCompressedPart(begin, compressedTotalLen int64, payload []byte) error {
+	src := p.ActiveUploadSource()
+	if src == nil || begin < 0 || compressedTotalLen <= 0 || len(payload) == 0 {
+		return NewError(IllegalArgument)
+	}
+	if compressedTotalLen > math.MaxUint32 {
+		return NewError(IllegalArgument)
+	}
+	if src.Size() <= math.MaxUint32 {
+		packet := clientproto.CompressedPart32{
+			Hash:             src.GetHash(),
+			BeginOffset:      uint32(begin),
+			CompressedLength: uint32(compressedTotalLen),
+		}
+		raw, protoSize, err := p.combiner.PackPayload("client.CompressedPart32", &packet, payload)
+		if err != nil {
+			return err
+		}
+		p.QueuePacketWithStats(raw, int64(protoSize), int64(len(payload)))
+		p.session.Credits().AddUploaded(p.remoteHash, int64(len(payload)), p.identityVerified)
+		return nil
+	}
+	packet := clientproto.CompressedPart64{
+		Hash:             src.GetHash(),
+		BeginOffset:      uint64(begin),
+		CompressedLength: uint32(compressedTotalLen),
+	}
+	raw, protoSize, err := p.combiner.PackPayload("client.CompressedPart64", &packet, payload)
+	if err != nil {
+		return err
+	}
+	p.QueuePacketWithStats(raw, int64(protoSize), int64(len(payload)))
+	p.session.Credits().AddUploaded(p.remoteHash, int64(len(payload)), p.identityVerified)
+	return nil
+}
+
+func (p *PeerConnection) sendCompressedPayload(begin int64, compressed []byte) error {
+	togo := len(compressed)
+	totalCompressed := int64(togo)
+	packetSize := togo
+	if togo > 10240 {
+		packetSize = togo / (togo / 10240)
+	}
+	offset := 0
+	for togo > 0 {
+		if togo < packetSize*2 {
+			packetSize = togo
+		}
+		chunk := compressed[offset : offset+packetSize]
+		if err := p.SendCompressedPart(begin, totalCompressed, chunk); err != nil {
+			return err
+		}
+		offset += packetSize
+		togo -= packetSize
+	}
 	return nil
 }
 
@@ -619,6 +835,19 @@ func (p *PeerConnection) SendBlockData() {
 	if togo == 0 {
 		return
 	}
+	if p.canCompressToPeer() {
+		if compressed, ok := tryCompressPayload(payload); ok {
+			if err := p.sendCompressedPayload(current.Begin, compressed); err != nil {
+				if q := p.session.UploadQueue(); q != nil {
+					q.RemoveFromUploadQueue(p)
+				}
+				return
+			}
+			current.Transferred = current.End - current.Begin
+			p.uploadDone = append(p.uploadDone, current)
+			return
+		}
+	}
 	packetSize := togo
 	if togo > 10240 {
 		packetSize = togo / (togo / 10240)
@@ -661,14 +890,30 @@ func (p *PeerConnection) HandleHelloAnswer(value *clientproto.HelloAnswer) {
 	}
 	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
 	debugPeerf("peer %s <- HelloAnswer", p.endpoint.String())
+	p.markHelloInfoDone()
+	p.SendExtHello()
 	if p.transfer != nil {
 		p.SendFileRequest(p.transfer.GetHash())
 	}
 }
 
-func (p *PeerConnection) HandleExtHello(_ *clientproto.ExtHello) {
+func (p *PeerConnection) HandleExtHello(value *clientproto.ExtHello) {
+	if value == nil {
+		return
+	}
 	debugPeerf("peer %s <- ExtHello", p.endpoint.String())
+	p.applyExtHelloTags(&value.Properties)
 	p.SendExtHelloAnswer()
+	p.markExtHelloInfoDone()
+}
+
+func (p *PeerConnection) HandleExtHelloAnswer(value *clientproto.ExtHelloAnswer) {
+	if value == nil {
+		return
+	}
+	debugPeerf("peer %s <- ExtHelloAnswer", p.endpoint.String())
+	p.applyExtHelloTags(&value.Properties)
+	p.markExtHelloInfoDone()
 }
 
 func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
@@ -682,10 +927,15 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 	}
 	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
 	debugPeerf("peer %s <- Hello", p.endpoint.String())
+	if value.Point.Defined() && IsLowID(value.Point.IP()) {
+		p.session.tryAttachCallbackPeer(p, value.Point.IP())
+	}
 	answer := p.PrepareHelloAnswer()
 	if raw, err := p.combiner.Pack("client.HelloAnswer", &answer); err == nil {
 		p.QueuePacket(raw)
 	}
+	p.markHelloInfoDone()
+	p.SendExtHello()
 }
 
 func (p *PeerConnection) ActiveUploadSource() UploadableResource {
@@ -759,6 +1009,28 @@ func (p *PeerConnection) HandleClientHashSetRequest(value *clientproto.HashSetRe
 		return
 	}
 	p.SendHashSetAnswer(res)
+}
+
+func (p *PeerConnection) HandleClientAICHRequest(value *clientproto.AICHRequest) {
+	if value == nil {
+		return
+	}
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
+		return
+	}
+	p.SendAICHAnswer(res, value.Hashes)
+}
+
+func (p *PeerConnection) HandleClientAICHFileHashRequest(value *clientproto.AICHFileHashRequest) {
+	if value == nil {
+		return
+	}
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
+		return
+	}
+	p.SendAICHFileHashAnswer(res)
 }
 
 func (p *PeerConnection) HandleClientStartUpload(value *clientproto.StartUpload) {
@@ -844,6 +1116,31 @@ func (p *PeerConnection) HandleClientRequestParts64(value *clientproto.RequestPa
 	return nil
 }
 
+func (p *PeerConnection) HandleAICHAnswer(value *clientproto.AICHAnswer) {
+	if value == nil || p.transfer == nil || !value.Hash.Equal(p.transfer.GetHash()) {
+		return
+	}
+	if len(value.Hashes) == 0 {
+		return
+	}
+	pieceIndex := p.pendingAICHPiece
+	p.pendingAICHPiece = -1
+	if pieceIndex < 0 {
+		return
+	}
+	p.transfer.StoreAICHPieceBlocks(pieceIndex, value.Hashes)
+	p.transfer.tryAICHRecoverPiece(pieceIndex)
+}
+
+func (p *PeerConnection) HandleAICHFileHashAnswer(value *clientproto.AICHFileHashAnswer) {
+	if value == nil || p.transfer == nil || !value.Hash.Equal(p.transfer.GetHash()) {
+		return
+	}
+	if _, ok := p.transfer.AICHRootHash(); !ok {
+		p.transfer.SetAICHRootHash(value.RootHash)
+	}
+}
+
 func (p *PeerConnection) HandleFileAnswer(value *clientproto.FileAnswer) {
 	debugPeerf("peer %s <- FileAnswer", p.endpoint.String())
 	if p.transfer != nil && value.Hash.Equal(p.transfer.GetHash()) {
@@ -892,6 +1189,14 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.HandleClientHello(value)
 		case *clientproto.ExtHello:
 			p.HandleExtHello(value)
+		case *clientproto.ExtHelloAnswer:
+			p.HandleExtHelloAnswer(value)
+		case *clientproto.PublicKey:
+			p.HandlePublicKey(value)
+		case *clientproto.Signature:
+			p.HandleSignature(value)
+		case *clientproto.SecIdentState:
+			p.HandleSecIdentState(value)
 		case *clientproto.FileRequest:
 			p.HandleClientFileRequest(value)
 		case *clientproto.FileAnswer:
@@ -903,6 +1208,10 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.HandleFileStatusAnswer(value)
 		case *clientproto.HashSetRequest:
 			p.HandleClientHashSetRequest(value)
+		case *clientproto.AICHRequest:
+			p.HandleClientAICHRequest(value)
+		case *clientproto.AICHFileHashRequest:
+			p.HandleClientAICHFileHashRequest(value)
 		case *clientproto.HashSetAnswer:
 			debugPeerf("peer %s <- HashSetAnswer parts=%d", p.endpoint.String(), len(value.Parts))
 			if p.transfer != nil {
@@ -934,6 +1243,8 @@ func (p *PeerConnection) ProcessIncoming() error {
 		case *clientproto.QueueRanking:
 			debugPeerf("peer %s <- QueueRanking", p.endpoint.String())
 			p.Close(QueueRanking)
+		case *clientproto.FileComment:
+			p.HandleFileComment(value)
 		case *clientproto.SendingPart32:
 			debugPeerf("peer %s <- SendingPart32 %d..%d", p.endpoint.String(), value.BeginOffset, value.EndOffset)
 			if req, err := data.MakePeerRequest(int64(value.BeginOffset), int64(value.EndOffset)); err == nil {
@@ -958,6 +1269,10 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.HandleRequestSources2(value)
 		case *clientproto.AnswerSources2:
 			p.HandleAnswerSources2(value)
+		case *clientproto.AICHAnswer:
+			p.HandleAICHAnswer(value)
+		case *clientproto.AICHFileHashAnswer:
+			p.HandleAICHFileHashAnswer(value)
 		}
 	}
 	return nil
@@ -1151,7 +1466,7 @@ func (p *PeerConnection) ReceivePendingData() {
 	if len(payload) == 0 {
 		return
 	}
-	p.session.Credits().AddDownloaded(p.remoteHash, int64(len(payload)))
+	p.session.Credits().AddDownloaded(p.remoteHash, int64(len(payload)), p.identityVerified)
 	offset := int(p.recvReq.InBlockOffset()) + p.recvPos
 	copy(pb.Buffer[offset:], payload)
 	pb.Received += int64(len(payload))
@@ -1264,6 +1579,9 @@ func (p *PeerConnection) removePending(block data.PieceBlock) {
 }
 
 func (p *PeerConnection) asyncWrite(block data.PieceBlock, buffer []byte, transfer *Transfer) {
+	if transfer != nil {
+		transfer.throttleDownloadWrite(len(buffer))
+	}
 	transfer.picker.MarkAsWriting(block)
 	p.session.SubmitDiskTask(NewAsyncWrite(block, buffer, transfer))
 }
@@ -1365,6 +1683,18 @@ func (p *PeerConnection) SendRequestSources2(hash protocol.Hash) error {
 	return nil
 }
 
+func (p *PeerConnection) HandleFileComment(value *clientproto.FileComment) {
+	if value == nil || p.remotePeerInfo.Misc1.AcceptCommentVer == 0 {
+		return
+	}
+	comment := string(value.Comment)
+	if len(comment) > clientproto.MaxFileCommentLen {
+		comment = comment[:clientproto.MaxFileCommentLen]
+	}
+	p.remoteFileRating = value.Rating
+	p.remoteFileComment = comment
+}
+
 func (p *PeerConnection) HandleRequestSources2(req *clientproto.RequestSources2) {
 	if req == nil {
 		return
@@ -1413,7 +1743,7 @@ func (p *PeerConnection) buildSourceExchangeEntries(peers []Peer) []clientproto.
 			ServerIP:     0,
 			ServerPort:   0,
 			UserHash:     protocol.Invalid,
-			CryptOptions: 0,
+			CryptOptions: cryptOptionsForLocal(p.session.settings),
 		})
 	}
 	return out
@@ -1432,7 +1762,13 @@ func (p *PeerConnection) HandleAnswerSources2(ans *clientproto.AnswerSources2) {
 		if !p.isAcceptableSourceExchangeEndpoint(ep) {
 			continue
 		}
-		peers = append(peers, NewPeerWithSource(ep, true, int(PeerSourceExchange)))
+		peers = append(peers, Peer{
+			Endpoint:     ep,
+			Connectable:  true,
+			SourceFlag:   int(PeerSourceExchange),
+			UserHash:     e.UserHash,
+			CryptOptions: e.CryptOptions,
+		})
 	}
 	if n := p.transfer.policy.MergeSourceExchangePeers(peers); n > 0 {
 		debugPeerf("peer %s <- AnswerSources2 merged=%d", p.endpoint.String(), n)
@@ -1464,4 +1800,174 @@ func (p *PeerConnection) isAcceptableSourceExchangeEndpoint(ep protocol.Endpoint
 		return false
 	}
 	return true
+}
+
+const (
+	helloInfoStandard = 1 << 0
+	helloInfoExtended = 1 << 1
+
+	extTagSecIdentVersion = 0x28
+	extTagSecIdentKeyFP   = 0x29
+)
+
+func (p *PeerConnection) IdentityVerified() bool {
+	return p != nil && p.identityVerified
+}
+
+func (p *PeerConnection) applyExtHelloTags(props *protocol.TagList) {
+	if props == nil {
+		return
+	}
+	for _, t := range *props {
+		switch t.ID {
+		case extTagSecIdentVersion:
+			if t.Type == protocol.TagTypeUint32 {
+				p.remoteSecIdentVer = int(t.UInt32)
+			}
+		case extTagSecIdentKeyFP:
+			if t.Type == protocol.TagTypeUint32 {
+				p.remoteKeyFP = t.UInt32
+			}
+		}
+	}
+}
+
+func (p *PeerConnection) markHelloInfoDone() {
+	p.helloInfoFlags |= helloInfoStandard
+	p.maybeStartSecIdent()
+}
+
+func (p *PeerConnection) markExtHelloInfoDone() {
+	p.helloInfoFlags |= helloInfoExtended
+	p.maybeStartSecIdent()
+}
+
+func (p *PeerConnection) secIdentEnabled() bool {
+	if p == nil || p.session == nil {
+		return false
+	}
+	if !p.session.settings.EnableSecIdent {
+		return false
+	}
+	if p.remotePeerInfo.Misc1.SupportSecIdent == 0 {
+		return false
+	}
+	id := p.session.Identity()
+	return id != nil && id.Available()
+}
+
+func (p *PeerConnection) maybeStartSecIdent() {
+	if p.helloInfoFlags&helloInfoStandard == 0 || p.helloInfoFlags&helloInfoExtended == 0 {
+		return
+	}
+	if !p.secIdentEnabled() {
+		return
+	}
+	p.SendSecIdentState()
+}
+
+func (p *PeerConnection) randomChallenge() uint32 {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 1
+	}
+	ch := binary.LittleEndian.Uint32(buf[:])
+	if ch == 0 {
+		return 1
+	}
+	return ch
+}
+
+func (p *PeerConnection) SendSecIdentState() {
+	if !p.secIdentEnabled() {
+		return
+	}
+	state := byte(SecIdentStateSignatureNeeded)
+	if len(p.remotePubKey) == 0 {
+		state = SecIdentStateKeyAndSigNeeded
+	}
+	p.ourChallenge = p.randomChallenge()
+	packet := clientproto.SecIdentState{State: state, Challenge: p.ourChallenge}
+	if raw, err := p.combiner.Pack("client.SecIdentState", &packet); err == nil {
+		debugPeerf("peer %s -> SecIdentState state=%d", p.endpoint.String(), state)
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendPublicKey() {
+	id := p.session.Identity()
+	if id == nil || !id.Available() {
+		return
+	}
+	packet := clientproto.PublicKey{Key: id.PublicKeyDER()}
+	if raw, err := p.combiner.Pack("client.PublicKey", &packet); err == nil {
+		debugPeerf("peer %s -> PublicKey len=%d", p.endpoint.String(), len(packet.Key))
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendSignature() {
+	id := p.session.Identity()
+	if id == nil || !id.Available() || len(p.remotePubKey) == 0 || p.remoteChallenge == 0 {
+		return
+	}
+	sig, err := id.SignChallenge(p.remotePubKey, p.remoteChallenge)
+	if err != nil {
+		debugPeerf("peer %s sign challenge failed: %v", p.endpoint.String(), err)
+		return
+	}
+	packet := clientproto.Signature{Signature: sig}
+	if raw, err := p.combiner.Pack("client.Signature", &packet); err == nil {
+		debugPeerf("peer %s -> Signature len=%d", p.endpoint.String(), len(sig))
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) HandleSecIdentState(value *clientproto.SecIdentState) {
+	if value == nil || !p.secIdentEnabled() {
+		return
+	}
+	debugPeerf("peer %s <- SecIdentState state=%d", p.endpoint.String(), value.State)
+	p.remoteChallenge = value.Challenge
+	switch value.State {
+	case SecIdentStateSignatureNeeded:
+		if len(p.remotePubKey) == 0 {
+			p.SendPublicKey()
+		}
+		p.SendSignature()
+	case SecIdentStateKeyAndSigNeeded:
+		p.SendPublicKey()
+	}
+}
+
+func (p *PeerConnection) HandlePublicKey(value *clientproto.PublicKey) {
+	if value == nil || len(value.Key) == 0 {
+		return
+	}
+	if len(p.remotePubKey) == 0 {
+		p.remotePubKey = append([]byte(nil), value.Key...)
+		if p.remoteKeyFP != 0 && PublicKeyFingerprint(value.Key) != p.remoteKeyFP {
+			debugPeerf("peer %s public key fingerprint mismatch", p.endpoint.String())
+		}
+	}
+	p.SendSignature()
+}
+
+func (p *PeerConnection) HandleSignature(value *clientproto.Signature) {
+	if value == nil || len(value.Signature) == 0 || !p.secIdentEnabled() {
+		return
+	}
+	id := p.session.Identity()
+	if id == nil || !id.Available() || p.ourChallenge == 0 {
+		return
+	}
+	if err := VerifySecIdentSignature(p.remotePubKey, id.PublicKeyDER(), p.ourChallenge, value.Signature); err != nil {
+		debugPeerf("peer %s secure ident verify failed: %v", p.endpoint.String(), err)
+		if p.session.settings.SecIdentRequired {
+			p.Close(IllegalArgument)
+		}
+		return
+	}
+	p.identityVerified = true
+	debugPeerf("peer %s secure ident verified", p.endpoint.String())
 }

@@ -201,3 +201,59 @@ func TestDHTTrackerSnapshotAndApplyState(t *testing.T) {
 		t.Fatalf("expected storage point %s, got %s", router.String(), status.StoragePoint)
 	}
 }
+
+func TestDHTTrackerCallbackReqConfirmsNode(t *testing.T) {
+	tracker := NewDHTTracker(0, 0)
+	addr, err := net.ResolveUDPAddr("udp", "1.2.3.4:4672")
+	if err != nil {
+		t.Fatalf("resolve addr: %v", err)
+	}
+	node := &KadRoutingNode{
+		ID:   kadproto.NewID(protocol.MustHashFromString("23A8CEFF57A7A32D562D649ED7893796")),
+		Addr: addr,
+	}
+	tracker.nodes[addr.String()] = node
+	tracker.node.processCallbackReq(addr)
+	if !node.Pinged {
+		t.Fatal("expected node to be confirmed after CallbackReq")
+	}
+}
+
+func TestDHTTrackerFindBuddyReqRes(t *testing.T) {
+	tracker := NewDHTTracker(0, 0)
+	tracker.firewalled = false
+	responder, err := net.ResolveUDPAddr("udp", "1.2.3.4:4672")
+	if err != nil {
+		t.Fatalf("resolve responder: %v", err)
+	}
+	requester, err := net.ResolveUDPAddr("udp", "5.6.7.8:4672")
+	if err != nil {
+		t.Fatalf("resolve requester: %v", err)
+	}
+	tracker.nodes[requester.String()] = &KadRoutingNode{
+		ID:   kadproto.NewID(protocol.MustHashFromString("31D6CFE0D16AE931B73C59D7E0C089C0")),
+		Addr: requester,
+	}
+	tracker.node.processFindBuddyReq(responder)
+	tracker.node.processFindBuddyRes(requester)
+	if tracker.buddyAddr == nil || tracker.buddyAddr.String() != requester.String() {
+		t.Fatalf("expected buddy addr %s, got %v", requester, tracker.buddyAddr)
+	}
+	if tracker.buddyHash.Equal(protocol.Invalid) {
+		t.Fatal("expected buddy hash to be set")
+	}
+}
+
+func TestDHTTrackerFindBuddyReqIgnoredWhenFirewalled(t *testing.T) {
+	tracker := NewDHTTracker(0, 0)
+	tracker.firewalled = true
+	addr, err := net.ResolveUDPAddr("udp", "1.2.3.4:4672")
+	if err != nil {
+		t.Fatalf("resolve addr: %v", err)
+	}
+	tracker.node.processFindBuddyReq(addr)
+	// firewalled node should not reply; no panic and no buddy set is sufficient
+	if tracker.buddyAddr != nil {
+		t.Fatal("firewalled tracker should not record buddy from req handling")
+	}
+}

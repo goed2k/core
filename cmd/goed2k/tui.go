@@ -37,6 +37,7 @@ type tuiModel struct {
 	cfg           runConfig
 	targetPaths   []string
 	includeDHT    bool
+	includeDHTv6 bool
 	deadline      time.Time
 	width         int
 	height        int
@@ -130,6 +131,7 @@ func newTUIModel(app *appContext, cfg runConfig, events <-chan ed2k.ClientStatus
 		cfg:          cfg,
 		targetPaths:  append([]string(nil), app.targetPaths...),
 		includeDHT:   app.includeDHT,
+		includeDHTv6: app.includeDHTv6,
 		deadline:     app.deadline,
 		status:       app.client.Status(),
 		search:       app.client.SearchSnapshot(),
@@ -149,7 +151,8 @@ func newTUIModel(app *appContext, cfg runConfig, events <-chan ed2k.ClientStatus
 
 func newTransferTable() table.Model {
 	columns := []table.Column{
-		{Title: "Name", Width: 28},
+		{Title: "Pri", Width: 3},
+		{Title: "Name", Width: 24},
 		{Title: "State", Width: 12},
 		{Title: "Done", Width: 8},
 		{Title: "Recv", Width: 8},
@@ -170,11 +173,11 @@ func newTransferTable() table.Model {
 func newSearchTable() table.Model {
 	columns := []table.Column{
 		{Title: "#", Width: 4},
-		{Title: "Name", Width: 34},
+		{Title: "Name", Width: 28},
 		{Title: "Size", Width: 10},
-		{Title: "Src", Width: 10},
+		{Title: "Src", Width: 8},
 		{Title: "Sources", Width: 8},
-		{Title: "Complete", Width: 8},
+		{Title: "Note", Width: 18},
 	}
 	t := table.New(
 		table.WithColumns(columns),
@@ -447,6 +450,9 @@ func (m tuiModel) renderSearchPage() string {
 	}
 	if result := m.selectedSearchResult(); result != nil {
 		info = append(info, fmt.Sprintf("selected=%s", emptyFallback(result.FileName, result.Hash.String())))
+		if strings.TrimSpace(result.Note) != "" {
+			info = append(info, "note="+trimString(result.Note, maxInt(24, m.width-16)))
+		}
 		if link := result.ED2KLink(); link != "" {
 			info = append(info, "ed2k="+trimString(link, maxInt(24, m.width-16)))
 		}
@@ -469,7 +475,15 @@ func (m tuiModel) renderSearchPage() string {
 func (m *tuiModel) syncTransfers() {
 	transfers := append([]ed2k.TransferSnapshot(nil), m.status.Transfers...)
 	sort.Slice(transfers, func(i, j int) bool {
-		return transfers[i].CreateTime < transfers[j].CreateTime
+		pi := transfers[i].DownloadPriority.SortKey()
+		pj := transfers[j].DownloadPriority.SortKey()
+		if pi != pj {
+			return pi > pj
+		}
+		if transfers[i].CreateTime != transfers[j].CreateTime {
+			return transfers[i].CreateTime < transfers[j].CreateTime
+		}
+		return transfers[i].Hash.Compare(transfers[j].Hash) < 0
 	})
 	m.transfers = transfers
 	rows := make([]table.Row, 0, len(transfers))
@@ -479,7 +493,8 @@ func (m *tuiModel) syncTransfers() {
 			selectedCursor = i
 		}
 		rows = append(rows, table.Row{
-			trimString(transfer.FileName, 28),
+			transfer.DownloadPriority.Label(),
+			trimString(transfer.FileName, 24),
 			string(transfer.Status.State),
 			fmt.Sprintf("%.1f%%", percent(transfer.Status.TotalDone, transfer.Status.TotalWanted)),
 			fmt.Sprintf("%.1f%%", percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
@@ -596,11 +611,11 @@ func (m *tuiModel) syncSearchResults() {
 	for i, result := range m.search.Results {
 		rows = append(rows, table.Row{
 			fmt.Sprintf("%d", i+1),
-			trimString(emptyFallback(result.FileName, result.Hash.String()), 34),
+			trimString(emptyFallback(result.FileName, result.Hash.String()), 28),
 			humanSize(result.FileSize),
 			searchResultSourceLabel(result.Source),
 			fmt.Sprintf("%d", result.Sources),
-			fmt.Sprintf("%d", result.CompleteSources),
+			trimString(result.Note, 18),
 		})
 	}
 	m.searchTable.SetRows(rows)
@@ -828,6 +843,10 @@ func (m tuiModel) renderHeader() string {
 		dht := m.client.DHTStatus()
 		status += fmt.Sprintf("  kad live=%d known=%d run=%d", dht.LiveNodes, dht.KnownNodes, dht.RunningTraversals)
 	}
+	if m.includeDHTv6 {
+		dhtv6 := m.client.DHTv6Status()
+		status += fmt.Sprintf("  kadv6 live=%d known=%d run=%d", dhtv6.LiveNodes, dhtv6.KnownNodes, dhtv6.RunningTraversals)
+	}
 	return headerStyle.Render(status)
 }
 
@@ -854,9 +873,11 @@ func (m tuiModel) renderEmptyState(width int) string {
 		fmt.Sprintf("output=%s", emptyFallback(m.cfg.outDir, ".")),
 		fmt.Sprintf("servers=%s", emptyFallback(m.cfg.serverAddr, "-")),
 		fmt.Sprintf("server.met=%s", emptyFallback(m.cfg.serverMetPath, "-")),
-		fmt.Sprintf("kad=%t  upnp=%t  nodes.dat=%s", m.cfg.enableKAD, m.cfg.enableUPnP, emptyFallback(m.cfg.kadNodesDat, "-")),
+		fmt.Sprintf("kad=%t  kadv6=%t  upnp=%t  nodes.dat=%s", m.cfg.enableKAD, m.cfg.enableKADV6, m.cfg.enableUPnP, emptyFallback(m.cfg.kadNodesDat, "-")),
 		fmt.Sprintf("kad bootstrap=%s", emptyFallback(m.cfg.kadNodes, "-")),
-		fmt.Sprintf("listen=%d  udp=%d  peer-timeout=%ds", m.runtimeListenPort(), m.runtimeUDPPort(), m.cfg.peerTimeout),
+		fmt.Sprintf("kadv6 nodes6.dat=%s", emptyFallback(m.cfg.kadv6NodesDat, "-")),
+		fmt.Sprintf("kadv6 bootstrap=%s", emptyFallback(m.cfg.kadv6Nodes, "-")),
+		fmt.Sprintf("listen=%d  udp=%d  udp6=%d  peer-timeout=%ds", m.runtimeListenPort(), m.runtimeUDPPort(), m.runtimeUDPPortV6(), m.cfg.peerTimeout),
 	}
 	if !m.deadline.IsZero() {
 		lines = append(lines, fmt.Sprintf("timeout=%s", time.Until(m.deadline).Round(time.Second)))
@@ -880,7 +901,7 @@ func (m tuiModel) renderTransferSection(transfer ed2k.TransferSnapshot, width in
 	serverPeers := countPeersWithSource(transfer.Peers, ed2k.PeerServer)
 	lines := []string{
 		titleStyle.Render(transfer.FileName),
-		fmt.Sprintf("state=%s  done=%.2f%%  recv=%.2f%%", transfer.Status.State, percent(transfer.Status.TotalDone, transfer.Status.TotalWanted), percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
+		fmt.Sprintf("priority=%s (%s)  state=%s  done=%.2f%%  recv=%.2f%%", transfer.DownloadPriority.Label(), transfer.DownloadPriority.TextLabel(), transfer.Status.State, percent(transfer.Status.TotalDone, transfer.Status.TotalWanted), percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
 		fmt.Sprintf("rate=%s  up=%s  peers=%d  active=%d  kad_peers=%d  server_peers=%d", humanRate(transfer.Status.DownloadRate), humanRate(transfer.Status.UploadRate), transfer.Status.NumPeers, transfer.ActivePeers, kadPeers, serverPeers),
 		fmt.Sprintf("done=%d  recv=%d  total=%d", transfer.Status.TotalDone, transfer.Status.TotalReceived, transfer.Status.TotalWanted),
 		progressBarLine("done", transfer.Status.TotalDone, transfer.Status.TotalWanted, width-8),
@@ -1005,6 +1026,15 @@ func (m tuiModel) runtimeListenPort() int {
 		return port
 	}
 	return m.cfg.listenPort
+}
+
+func (m tuiModel) runtimeUDPPortV6() int {
+	if tracker := m.client.GetDHTv6Tracker(); tracker != nil {
+		if port := tracker.ListenPort(); port > 0 {
+			return port
+		}
+	}
+	return m.cfg.udpPortV6
 }
 
 func (m tuiModel) runtimeUDPPort() int {

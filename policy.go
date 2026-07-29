@@ -29,7 +29,16 @@ func NewPolicy(t *Transfer) Policy {
 }
 
 func (p Policy) IsConnectCandidate(pe Peer) bool {
-	return !(pe.Connection != nil || !pe.Connectable || pe.FailCount > 10)
+	if pe.Connection != nil || !pe.Connectable || pe.FailCount > 10 {
+		return false
+	}
+	if !p.isPeerAllowed(pe) {
+		return false
+	}
+	if pe.ServerClientID != 0 {
+		return true
+	}
+	return pe.HasDialableAddress()
 }
 
 func (p Policy) IsEraseCandidate(pe Peer) bool {
@@ -194,14 +203,23 @@ func (p *Policy) FindConnectCandidate(sessionTime int64) *Peer {
 
 func (p *Policy) ConnectOnePeer(sessionTime int64) (bool, error) {
 	peerInfo := p.FindConnectCandidate(sessionTime)
-	if peerInfo != nil {
-		_, err := p.transfer.ConnectToPeer(peerInfo)
-		if err != nil {
-			return false, err
-		}
-		return peerInfo.Connection != nil, nil
+	if peerInfo == nil {
+		return false, nil
 	}
-	return false, nil
+	if peerInfo.ServerClientID != 0 && p.transfer != nil && p.transfer.session != nil {
+		if !IsLowID(p.transfer.session.GetClientID()) {
+			if p.transfer.session.RequestServerCallback(p.transfer, peerInfo.ServerClientID) {
+				peerInfo.LastConnected = sessionTime
+				return true, nil
+			}
+			return false, nil
+		}
+	}
+	_, err := p.transfer.ConnectToPeer(peerInfo)
+	if err != nil {
+		return false, err
+	}
+	return peerInfo.Connection != nil, nil
 }
 
 func (p *Policy) ConnectionClosed(c *PeerConnection, sessionTime int64) {
