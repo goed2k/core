@@ -20,6 +20,10 @@
 - UPnP 调试日志默认关闭（`upnp.Debug`）
 - 连接读缓冲复用，减少每 tick 分配；补充 I/O 超时注释
 - TUI：有任务时进入 `/setting` 显示中文锁定提示
+- CI：单元测试输出 `-coverprofile` 覆盖率摘要
+- Integration 工作流：每日 UTC 03:00 定时运行
+- Release 矩阵：linux/windows/darwin × amd64/arm64
+- `TestEMuleInteropHarness`：本地双端上传与协议线格式回归
 
 ## [0.1.1] - 2026-07-29
 

@@ -57,7 +57,11 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -timeout 5m -race -count=1 ./...
+        run: go test -timeout 5m -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        shell: bash
+        run: go tool cover -func=coverage.out | tail -1
 
       - name: Build binaries
         run: go build ./cmd/goed2k
