@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-29
+
 ### 新增
 
 - CLI 状态持久化：默认 `~/.config/goed2k/state.json`，`--state-path` / `--no-state`
@@ -13,6 +15,7 @@
 - 公开包 `bootstrap`：CLI / daemon 共享的客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
 - `--timeout` / `--link` 模式下 TUI 在任务全部完成或超时后自动退出
 - CLI：`--sec-ident-required`、`--max-upload-rate-kb`、`--secure`（CryptLayer + SecIdent 预设）
+- `TestEMuleInteropHarness`：本地双端上传与协议线格式回归
 
 ### 变更
 
@@ -23,7 +26,11 @@
 - CI：单元测试输出 `-coverprofile` 覆盖率摘要
 - Integration 工作流：每日 UTC 03:00 定时运行
 - Release 矩阵：linux/windows/darwin × amd64/arm64
-- `TestEMuleInteropHarness`：本地双端上传与协议线格式回归
+
+### 修复
+
+- Windows CI：`registerClientTransferFileCleanup` 推广，避免 TempDir 清理时文件句柄未关闭
+- TUI：`--timeout` 在交互模式下真正生效
 
 ## [0.1.1] - 2026-07-29
 
