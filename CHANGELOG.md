@@ -15,7 +15,7 @@
 - 公开包 `bootstrap`：CLI / daemon 共享的客户端初始化与后台引导（连服务器、nodes.dat、状态加载）
 - `--timeout` / `--link` 模式下 TUI 在任务全部完成或超时后自动退出
 - CLI：`--sec-ident-required`、`--max-upload-rate-kb`、`--secure`（CryptLayer + SecIdent 预设）
-- `TestEMuleInteropHarness`：本地双端上传与协议线格式回归
+- `TestEMuleInteropHarness`：本地双端上传与协议线格式回归（含 CryptLayer 混淆端口联调）
 
 ### 变更
 
@@ -31,6 +31,9 @@
 
 - Windows CI：`registerClientTransferFileCleanup` 推广，避免 TempDir 清理时文件句柄未关闭
 - TUI：`--timeout` 在交互模式下真正生效
+- CryptLayer：出站拨号使用对端 `TCP端口+3`（不再误用本地 ListenPort）
+- CryptLayer：主监听端口不再强制包装 ObfuscatedConn，可选混淆走独立混淆端口
+- CryptLayer：入站/出站握手支持增量读取，与 PumpIO 协同完成后再发送 Hello
 
 ## [0.1.1] - 2026-07-29
 

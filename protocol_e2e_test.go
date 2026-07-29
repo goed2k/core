@@ -76,7 +76,13 @@ func (h *emuleInteropHarness) runLocalUpload(t *testing.T, seedSettings, leechSe
 	if err != nil {
 		t.Fatalf("endpoint: %v", err)
 	}
-	if err := leechHandle.transfer.AddPeer(endpoint, int(PeerResume)); err != nil {
+	peer := NewPeerWithSource(endpoint, true, int(PeerResume))
+	if seedSettings.EnableCryptLayer || seedSettings.CryptLayerRequired ||
+		leechSettings.EnableCryptLayer || leechSettings.CryptLayerRequired {
+		peer.UserHash = seedSession.GetUserAgent()
+		peer.CryptOptions = cryptOptionsForLocal(seedSettings)
+	}
+	if _, err := leechHandle.transfer.policy.AddPeer(peer); err != nil {
 		t.Fatalf("add peer: %v", err)
 	}
 
@@ -112,7 +118,12 @@ func TestEMuleInteropHarness(t *testing.T) {
 	})
 
 	t.Run("local_upload_crypt_layer", func(t *testing.T) {
-		t.Skip("CryptLayer 本地双端上传联调尚未稳定，待后续补齐")
+		payload := bytes.Repeat([]byte("eMule-interop-crypt-"), 4096)
+		seed := NewSettings()
+		seed.EnableCryptLayer = true
+		leech := NewSettings()
+		leech.EnableCryptLayer = true
+		h.runLocalUpload(t, seed, leech, payload)
 	})
 
 	t.Run("hello_tag_parsing", func(t *testing.T) {

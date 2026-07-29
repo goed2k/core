@@ -152,6 +152,23 @@ func TestObfuscatedConnWriteRead(t *testing.T) {
 	_ = localHash
 }
 
+func TestObfuscationDialAddrUsesPeerPort(t *testing.T) {
+	base := &net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: 4662}
+	local := NewSettings()
+	local.ListenPort = 4711
+	local.ObfuscationTCPPort = 4999
+	got := obfuscationDialAddr(base, local)
+	if got == nil {
+		t.Fatal("expected obfuscation dial addr")
+	}
+	if got.Port != 4665 {
+		t.Fatalf("port: got %d want 4665", got.Port)
+	}
+	if got.IP.String() != base.IP.String() {
+		t.Fatalf("ip: got %s want %s", got.IP, base.IP)
+	}
+}
+
 func TestPeerWantsObfuscation(t *testing.T) {
 	st := NewSettings()
 	if peerWantsObfuscation(nil, st) {
