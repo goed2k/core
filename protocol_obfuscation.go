@@ -113,17 +113,17 @@ const (
 // ObfuscatedConn wraps a TCP connection with eMule Basic Obfuscation (RC4).
 type ObfuscatedConn struct {
 	net.Conn
-	mu         sync.Mutex
-	role       obfHandshakeRole
-	state      obfConnState
-	sendCipher *rc4StreamCipher
-	recvCipher *rc4StreamCipher
-	localHash  protocol.Hash
-	remoteHash protocol.Hash
-	required   bool
-	handshake  *obfHandshakeMachine
-	readBuf       []byte
-	handshakeBuf  []byte
+	mu           sync.Mutex
+	role         obfHandshakeRole
+	state        obfConnState
+	sendCipher   *rc4StreamCipher
+	recvCipher   *rc4StreamCipher
+	localHash    protocol.Hash
+	remoteHash   protocol.Hash
+	required     bool
+	handshake    *obfHandshakeMachine
+	readBuf      []byte
+	handshakeBuf []byte
 }
 
 // NewOutgoingClientObfuscatedConn wraps a TCP connection for client-client obfuscation.
