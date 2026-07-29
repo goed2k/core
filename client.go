@@ -276,6 +276,10 @@ func (c *Client) SearchDHTKeywords(keywordHash protocol.Hash, cb func([]kadproto
 	return c.EnableDHT().SearchKeywords(keywordHash, cb)
 }
 
+func (c *Client) SearchDHTNotes(fileHash protocol.Hash, cb func([]kadproto.SearchEntry)) bool {
+	return c.EnableDHT().SearchNotes(fileHash, cb)
+}
+
 func (c *Client) StartSearch(params SearchParams) (SearchHandle, error) {
 	return c.session.StartSearch(params)
 }
@@ -564,6 +568,57 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 	return handle, targetPath, err
 }
 
+type CollectionAddResult struct {
+	Handles    []TransferHandle
+	TargetPath []string
+}
+
+func (c *Client) AddCollectionLink(linkValue, outputDir string) (CollectionAddResult, error) {
+	linkValue = strings.TrimSpace(linkValue)
+	if linkValue == "" {
+		return CollectionAddResult{}, NewError(LinkMailformed)
+	}
+
+	var fileLinks []EMuleLink
+	if strings.HasPrefix(strings.ToLower(linkValue), "ed2k://") {
+		link, err := ParseEMuleLink(linkValue)
+		if err != nil {
+			return CollectionAddResult{}, err
+		}
+		switch link.Type {
+		case LinkCollection:
+			fileLinks = link.FileLinks
+		case LinkFile:
+			fileLinks = []EMuleLink{link}
+		default:
+			return CollectionAddResult{}, errors.New("unsupported collection link type")
+		}
+	} else {
+		links, err := ParseEMuleCollectionFile(linkValue)
+		if err != nil {
+			return CollectionAddResult{}, err
+		}
+		fileLinks = links
+	}
+	if len(fileLinks) == 0 {
+		return CollectionAddResult{}, NewError(LinkMailformed)
+	}
+
+	result := CollectionAddResult{
+		Handles:    make([]TransferHandle, 0, len(fileLinks)),
+		TargetPath: make([]string, 0, len(fileLinks)),
+	}
+	for _, fileLink := range fileLinks {
+		handle, targetPath, err := c.AddLink(FormatLink(fileLink.StringValue, fileLink.NumberValue, fileLink.Hash), outputDir)
+		if err != nil {
+			return result, err
+		}
+		result.Handles = append(result.Handles, handle)
+		result.TargetPath = append(result.TargetPath, targetPath)
+	}
+	return result, nil
+}
+
 func (c *Client) loadServerMet(source string) (*serverproto.ServerMet, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -726,6 +781,49 @@ func (c *Client) SetTransferUploadPriority(hash protocol.Hash, priority UploadPr
 	}
 	handle.transfer.SetUploadPriority(priority)
 	return c.saveStateIfConfigured()
+}
+
+func (c *Client) SetTransferPriority(hash protocol.Hash, priority TransferPriority) error {
+	handle := c.FindTransfer(hash)
+	if !handle.IsValid() {
+		return errors.New("transfer not found")
+	}
+	handle.transfer.SetDownloadPriority(priority)
+	return c.saveStateIfConfigured()
+}
+
+func (c *Client) LoadIPFilter(path string) error {
+	filter, err := LoadIPFilter(path)
+	if err != nil {
+		return err
+	}
+	c.session.SetIPFilter(filter)
+	return nil
+}
+
+func (c *Client) SetIPFilter(filter *IPFilter) {
+	c.session.SetIPFilter(filter)
+}
+
+func (c *Client) BanPeer(endpoint protocol.Endpoint) error {
+	if !endpoint.Defined() {
+		return errors.New("invalid endpoint")
+	}
+	c.session.BanPeer(endpoint)
+	c.session.removeBannedPeerFromTransfers(endpoint)
+	return c.saveStateIfConfigured()
+}
+
+func (c *Client) ExportPartMetForTransfer(hash protocol.Hash) error {
+	handle := c.FindTransfer(hash)
+	if !handle.IsValid() {
+		return errors.New("transfer not found")
+	}
+	path := handle.GetFilePath()
+	if path == "" {
+		return errors.New("transfer has no file path")
+	}
+	return ExportPartMet(path, handle.GetResumeData())
 }
 
 func (c *Client) SuspendUpload(hash protocol.Hash, terminate bool) uint16 {

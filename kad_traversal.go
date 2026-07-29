@@ -30,6 +30,8 @@ const (
 	kadTraversalSearchSources kadTraversalKind = "search-sources"
 	kadTraversalFindKeywords  kadTraversalKind = "find-keywords"
 	kadTraversalSearchKeyword kadTraversalKind = "search-keywords"
+	kadTraversalFindNotes     kadTraversalKind = "find-notes"
+	kadTraversalSearchNotes   kadTraversalKind = "search-notes"
 	kadTraversalRefresh       kadTraversalKind = "refresh"
 	kadTraversalFirewalled    kadTraversalKind = "firewalled"
 )
@@ -50,7 +52,9 @@ func (o *kadObserver) expectMultipleResponses() bool {
 	if o == nil || o.traversal == nil {
 		return false
 	}
-	return o.traversal.kind == kadTraversalSearchSources || o.traversal.kind == kadTraversalSearchKeyword
+	return o.traversal.kind == kadTraversalSearchSources ||
+		o.traversal.kind == kadTraversalSearchKeyword ||
+		o.traversal.kind == kadTraversalSearchNotes
 }
 
 func (o *kadObserver) shortTimeout() {
@@ -142,7 +146,7 @@ func (t *kadTraversal) start() bool {
 	if t.kind == kadTraversalRefresh {
 		t.numTargetNodes = 1
 	}
-	if t.kind == kadTraversalSearchSources || t.kind == kadTraversalSearchKeyword {
+	if t.kind == kadTraversalSearchSources || t.kind == kadTraversalSearchKeyword || t.kind == kadTraversalSearchNotes {
 		t.numTargetNodes = len(t.results)
 	}
 	if t.node.tracker.table != nil {
@@ -267,7 +271,12 @@ func (t *kadTraversal) invoke(o *kadObserver) bool {
 			Target:   t.target,
 			StartPos: 0,
 		}, o.endpoint, o, kadproto.SearchResOp, &t.target.Hash, true)
-		case kadTraversalFirewalled:
+	case kadTraversalSearchNotes:
+		return t.node.invoke(kadproto.SearchNotesReq{
+			Target:   t.target,
+			FileSize: uint64(t.size),
+		}, o.endpoint, o, kadproto.SearchResOp, &t.target.Hash, true)
+	case kadTraversalFirewalled:
 			return t.node.invoke(kadproto.FirewalledReq{
 				TCPPort: uint16(t.node.listenPort()),
 				ID:      t.target,
@@ -309,7 +318,9 @@ func (t *kadTraversal) writeFailedObserver(o *kadObserver) {
 	if t == nil || t.node == nil || t.node.tracker == nil || o == nil {
 		return
 	}
-	if t.kind == kadTraversalFindSources || t.kind == kadTraversalSearchSources {
+	if t.kind == kadTraversalFindSources || t.kind == kadTraversalSearchSources ||
+		t.kind == kadTraversalFindKeywords || t.kind == kadTraversalSearchKeyword ||
+		t.kind == kadTraversalFindNotes || t.kind == kadTraversalSearchNotes {
 		return
 	}
 	if o.flags&kadObserverFlagNoID != 0 {
@@ -334,7 +345,7 @@ func (t *kadTraversal) finished(o *kadObserver) {
 		t.invokeCount--
 	}
 	switch t.kind {
-	case kadTraversalSearchSources, kadTraversalSearchKeyword:
+	case kadTraversalSearchSources, kadTraversalSearchKeyword, kadTraversalSearchNotes:
 		if len(o.entries) > 0 {
 			t.accum = append(t.accum, o.entries...)
 		}
@@ -397,6 +408,18 @@ func (t *kadTraversal) done() {
 			direct.addNode(o.endpoint, o.id, o.portTCP, o.version)
 		}
 		_ = direct.start()
+	case kadTraversalFindNotes:
+		direct := newKadTraversal(t.node, t.target, kadTraversalSearchNotes, t.size, t.listener)
+		if sp := t.node.storagePoint(); sp != nil {
+			direct.addNode(sp, t.target, 0, 0)
+		}
+		for _, o := range t.results {
+			if o == nil || o.flags&kadObserverFlagFailed != 0 {
+				continue
+			}
+			direct.addNode(o.endpoint, o.id, o.portTCP, o.version)
+		}
+		_ = direct.start()
 	case kadTraversalSearchSources:
 		for _, entry := range t.accum {
 			t.node.processPublishSourcesReq(nil, kadproto.PublishSourcesReq{
@@ -412,6 +435,16 @@ func (t *kadTraversal) done() {
 			t.node.processPublishKeysReq(nil, kadproto.PublishKeysReq{
 				KeywordID: t.target,
 				Sources:   []kadproto.SearchEntry{entry},
+			})
+		}
+		if t.listener != nil {
+			t.listener(t.accum)
+		}
+	case kadTraversalSearchNotes:
+		for _, entry := range t.accum {
+			t.node.processPublishNotesReq(nil, kadproto.PublishNotesReq{
+				FileID: t.target,
+				Notes:  []kadproto.SearchEntry{entry},
 			})
 		}
 		if t.listener != nil {

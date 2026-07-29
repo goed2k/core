@@ -55,12 +55,14 @@ type Session struct {
 	sharedStore              *SharedStore
 	sharedDirs               []string
 	serverMetMeta     map[string]serverMetEntryMeta
-	globUDPChallenge  map[uint32]string
+	globUDPChallenge  map[uint32]globUDPChallengeEntry
 	udpServerStats    map[string]serverUDPStats
 	serverStatUDPConn *net.UDPConn
 	serverStatUDPStop chan struct{}
 	listenPortWasDynamic bool
 	identity          *IdentityState
+	ipFilter          *IPFilter
+	bannedPeers       map[string]protocol.Endpoint
 }
 
 type serverMetEntryMeta struct {
@@ -375,7 +377,7 @@ func (s *Session) RequestSourcesNow(transfer *Transfer) bool {
 func (s *Session) ConnectNewPeers() {
 	stepsSinceLastConnect := 0
 	maxConnectionsPerSecond := s.settings.MaxConnectionsPerSecond
-	transfers := s.snapshotTransfers()
+	transfers := sortTransfersByDownloadPriority(s.snapshotTransfers())
 	connections := s.snapshotConnections()
 	numTransfers := len(transfers)
 	enumerateCandidates := true
@@ -636,6 +638,7 @@ func (s *Session) ConnectTo(identifier string, address *net.TCPAddr) error {
 	s.serverConnections[identifier] = sc
 	s.promotePrimaryServer(sc)
 	s.mu.Unlock()
+	s.ProbeServerPing(identifier, address)
 	return sc.Connect()
 }
 
@@ -1151,7 +1154,13 @@ func (s *Session) connectConfiguredServers(currentSessionTime int64) {
 		configured[identifier] = address
 	}
 	s.mu.Unlock()
-	for identifier, address := range configured {
+	identifiers := make([]string, 0, len(configured))
+	for identifier := range configured {
+		identifiers = append(identifiers, identifier)
+	}
+	sortServerIdentifiersByPing(s, identifiers, currentSessionTime)
+	for _, identifier := range identifiers {
+		address := configured[identifier]
 		if identifier == "" || address == nil {
 			continue
 		}

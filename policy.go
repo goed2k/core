@@ -32,6 +32,9 @@ func (p Policy) IsConnectCandidate(pe Peer) bool {
 	if pe.Connection != nil || !pe.Connectable || pe.FailCount > 10 {
 		return false
 	}
+	if !p.isPeerAllowed(pe) {
+		return false
+	}
 	if pe.ServerClientID != 0 {
 		return true
 	}

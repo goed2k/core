@@ -39,6 +39,7 @@ type Transfer struct {
 	speedMon           SpeedMonitor
 	pendingResumeIO    int
 	uploadPriority     UploadPriority
+	downloadPriority   TransferPriority
 	pendingPieceHashes map[int]bool
 	aichPendingPiece   map[int]bool
 }
@@ -62,6 +63,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		connections:        make([]*PeerConnection, 0),
 		speedMon:           NewSpeedMonitor(30),
 		uploadPriority:     UploadPriorityNormal,
+		downloadPriority:   TransferPriorityNormal,
 		pendingPieceHashes: make(map[int]bool),
 		aichPendingPiece:   make(map[int]bool),
 	}
@@ -135,6 +137,14 @@ func (t *Transfer) UploadPriority() UploadPriority {
 
 func (t *Transfer) SetUploadPriority(priority UploadPriority) {
 	t.uploadPriority = priority
+}
+
+func (t *Transfer) DownloadPriority() TransferPriority {
+	return t.downloadPriority
+}
+
+func (t *Transfer) SetDownloadPriority(priority TransferPriority) {
+	t.downloadPriority = priority
 }
 
 func (t *Transfer) Pause() {
