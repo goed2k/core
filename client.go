@@ -544,6 +544,7 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 	if link.Type != LinkFile {
 		return TransferHandle{}, "", errors.New("unsupported link type")
 	}
+	outputDir = ResolveCategoryOutputDir(c.session.settings.Categories, link.StringValue, outputDir)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return TransferHandle{}, "", err
 	}

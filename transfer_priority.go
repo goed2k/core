@@ -17,6 +17,42 @@ func (p TransferPriority) SortKey() int {
 	return int(p)
 }
 
+// Label 返回 P0-P4 优先级标记（P4 最高）。
+func (p TransferPriority) Label() string {
+	switch p {
+	case TransferPriorityVeryLow:
+		return "P0"
+	case TransferPriorityLow:
+		return "P1"
+	case TransferPriorityNormal:
+		return "P2"
+	case TransferPriorityHigh:
+		return "P3"
+	case TransferPriorityVeryHigh:
+		return "P4"
+	default:
+		return "P2"
+	}
+}
+
+// TextLabel 返回可读优先级文字。
+func (p TransferPriority) TextLabel() string {
+	switch p {
+	case TransferPriorityVeryLow:
+		return "very low"
+	case TransferPriorityLow:
+		return "low"
+	case TransferPriorityNormal:
+		return "normal"
+	case TransferPriorityHigh:
+		return "high"
+	case TransferPriorityVeryHigh:
+		return "very high"
+	default:
+		return "normal"
+	}
+}
+
 func sortTransfersByDownloadPriority(transfers []*Transfer) []*Transfer {
 	if len(transfers) < 2 {
 		return transfers

@@ -630,15 +630,16 @@ type settingsModel struct {
 	listenPortInput    textinput.Model
 	udpPortInput       textinput.Model
 	udpPortV6Input     textinput.Model
-	peerTimeoutInput   textinput.Model
-	timeoutInput       textinput.Model
-	cfg                runConfig
-	focus              int
-	status             string
-	submitted          bool
+	peerTimeoutInput       textinput.Model
+	maxDownloadRateKBInput textinput.Model
+	timeoutInput           textinput.Model
+	cfg                    runConfig
+	focus                  int
+	status                 string
+	submitted              bool
 }
 
-const settingsFocusCount = 16
+const settingsFocusCount = 17
 
 func runSettingsTUI(initial runConfig) (runConfig, error) {
 	model := newSettingsModel(initial)
@@ -672,6 +673,7 @@ func newSettingsModel(cfg runConfig) settingsModel {
 	m.udpPortInput = newSetupInput("4662", strconv.Itoa(cfg.udpPort))
 	m.udpPortV6Input = newSetupInput("4672", strconv.Itoa(cfg.udpPortV6))
 	m.peerTimeoutInput = newSetupInput("30", strconv.Itoa(cfg.peerTimeout))
+	m.maxDownloadRateKBInput = newSetupInput("0=unlimited", strconv.Itoa(cfg.maxDownloadRateKB))
 	timeoutValue := ""
 	if cfg.timeout > 0 {
 		timeoutValue = cfg.timeout.String()
@@ -713,7 +715,7 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
-			if m.focus == 15 {
+			if m.focus == 16 {
 				next, cmd := m.submit()
 				return next, cmd
 			}
@@ -760,6 +762,8 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case 13:
 		m.peerTimeoutInput, cmd = m.peerTimeoutInput.Update(msg)
 	case 14:
+		m.maxDownloadRateKBInput, cmd = m.maxDownloadRateKBInput.Update(msg)
+	case 15:
 		m.timeoutInput, cmd = m.timeoutInput.Update(msg)
 	}
 	return m, cmd
@@ -783,8 +787,9 @@ func (m settingsModel) View() string {
 		m.renderField(11, "UDP port", m.udpPortInput.View()),
 		m.renderField(12, "UDP6 port", m.udpPortV6Input.View()),
 		m.renderField(13, "Peer timeout", m.peerTimeoutInput.View()),
-		m.renderField(14, "Timeout", m.timeoutInput.View()),
-		m.renderStart(15, "[ Save settings ]"),
+		m.renderField(14, "DL rate KB/s", m.maxDownloadRateKBInput.View()),
+		m.renderField(15, "Timeout", m.timeoutInput.View()),
+		m.renderStart(16, "[ Save settings ]"),
 		"",
 		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP/KADV6 • Enter save • q quit"),
 	}
@@ -838,6 +843,7 @@ func (m *settingsModel) syncFocus() {
 		&m.udpPortInput,
 		&m.udpPortV6Input,
 		&m.peerTimeoutInput,
+		&m.maxDownloadRateKBInput,
 		&m.timeoutInput,
 	}
 	for _, input := range inputs {
@@ -867,6 +873,8 @@ func (m *settingsModel) syncFocus() {
 	case 13:
 		m.peerTimeoutInput.Focus()
 	case 14:
+		m.maxDownloadRateKBInput.Focus()
+	case 15:
 		m.timeoutInput.Focus()
 	}
 }
@@ -903,6 +911,11 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 		m.status = err.Error()
 		return *m, nil
 	}
+	maxDownloadRateKB, err := parseIntField("download rate", m.maxDownloadRateKBInput.Value())
+	if err != nil {
+		m.status = err.Error()
+		return *m, nil
+	}
 	timeout, err := parseDurationField(m.timeoutInput.Value())
 	if err != nil {
 		m.status = err.Error()
@@ -912,6 +925,7 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 	cfg.udpPort = udpPort
 	cfg.udpPortV6 = udpPortV6
 	cfg.peerTimeout = peerTimeout
+	cfg.maxDownloadRateKB = maxDownloadRateKB
 	cfg.timeout = timeout
 	m.cfg = cfg
 	m.submitted = true

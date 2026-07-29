@@ -151,7 +151,8 @@ func newTUIModel(app *appContext, cfg runConfig, events <-chan ed2k.ClientStatus
 
 func newTransferTable() table.Model {
 	columns := []table.Column{
-		{Title: "Name", Width: 28},
+		{Title: "Pri", Width: 3},
+		{Title: "Name", Width: 24},
 		{Title: "State", Width: 12},
 		{Title: "Done", Width: 8},
 		{Title: "Recv", Width: 8},
@@ -474,7 +475,15 @@ func (m tuiModel) renderSearchPage() string {
 func (m *tuiModel) syncTransfers() {
 	transfers := append([]ed2k.TransferSnapshot(nil), m.status.Transfers...)
 	sort.Slice(transfers, func(i, j int) bool {
-		return transfers[i].CreateTime < transfers[j].CreateTime
+		pi := transfers[i].DownloadPriority.SortKey()
+		pj := transfers[j].DownloadPriority.SortKey()
+		if pi != pj {
+			return pi > pj
+		}
+		if transfers[i].CreateTime != transfers[j].CreateTime {
+			return transfers[i].CreateTime < transfers[j].CreateTime
+		}
+		return transfers[i].Hash.Compare(transfers[j].Hash) < 0
 	})
 	m.transfers = transfers
 	rows := make([]table.Row, 0, len(transfers))
@@ -484,7 +493,8 @@ func (m *tuiModel) syncTransfers() {
 			selectedCursor = i
 		}
 		rows = append(rows, table.Row{
-			trimString(transfer.FileName, 28),
+			transfer.DownloadPriority.Label(),
+			trimString(transfer.FileName, 24),
 			string(transfer.Status.State),
 			fmt.Sprintf("%.1f%%", percent(transfer.Status.TotalDone, transfer.Status.TotalWanted)),
 			fmt.Sprintf("%.1f%%", percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
@@ -891,7 +901,7 @@ func (m tuiModel) renderTransferSection(transfer ed2k.TransferSnapshot, width in
 	serverPeers := countPeersWithSource(transfer.Peers, ed2k.PeerServer)
 	lines := []string{
 		titleStyle.Render(transfer.FileName),
-		fmt.Sprintf("state=%s  done=%.2f%%  recv=%.2f%%", transfer.Status.State, percent(transfer.Status.TotalDone, transfer.Status.TotalWanted), percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
+		fmt.Sprintf("priority=%s (%s)  state=%s  done=%.2f%%  recv=%.2f%%", transfer.DownloadPriority.Label(), transfer.DownloadPriority.TextLabel(), transfer.Status.State, percent(transfer.Status.TotalDone, transfer.Status.TotalWanted), percent(transfer.Status.TotalReceived, transfer.Status.TotalWanted)),
 		fmt.Sprintf("rate=%s  up=%s  peers=%d  active=%d  kad_peers=%d  server_peers=%d", humanRate(transfer.Status.DownloadRate), humanRate(transfer.Status.UploadRate), transfer.Status.NumPeers, transfer.ActivePeers, kadPeers, serverPeers),
 		fmt.Sprintf("done=%d  recv=%d  total=%d", transfer.Status.TotalDone, transfer.Status.TotalReceived, transfer.Status.TotalWanted),
 		progressBarLine("done", transfer.Status.TotalDone, transfer.Status.TotalWanted, width-8),

@@ -34,8 +34,9 @@ type runConfig struct {
 	kadNodes       string
 	kadv6NodesDat  string
 	kadv6Nodes     string
-	peerTimeout    int
-	timeout        time.Duration
+	peerTimeout       int
+	maxDownloadRateKB int
+	timeout           time.Duration
 }
 
 type appContext struct {
@@ -114,6 +115,7 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	settings.EnableDHTv6 = cfg.enableKADV6
 	settings.EnableUPnP = cfg.enableUPnP
 	settings.PeerConnectionTimeout = cfg.peerTimeout
+	settings.MaxDownloadRateKB = cfg.maxDownloadRateKB
 
 	client := ed2k.NewClient(settings)
 	if cfg.enableKAD {

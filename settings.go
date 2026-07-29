@@ -47,6 +47,7 @@ type Settings struct {
 	SecIdentRequired        bool
 	CreditsOnlyVerified     bool
 	IdentityKeyPath         string
+	Categories              []Category
 }
 
 func NewSettings() Settings {

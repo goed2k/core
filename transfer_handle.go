@@ -163,3 +163,12 @@ func (h TransferHandle) NeedResumeDataSave() bool {
 	defer h.mu.Unlock()
 	return h.transfer.NeedResumeDataSave()
 }
+
+func (h TransferHandle) DownloadPriority() TransferPriority {
+	if h.transfer == nil {
+		return TransferPriorityNormal
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.transfer.DownloadPriority()
+}
