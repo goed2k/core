@@ -40,14 +40,14 @@ func TestUPnPPortMapperMapAndClose(t *testing.T) {
 		t.Fatalf("close mapper: %v", err)
 	}
 
-	wantAdds := []string{"add:TCP:4661", "add:UDP:4662"}
+	wantAdds := []string{"add:TCP:4661", "add:TCP:4664", "add:UDP:4662"}
 	if got := deviceA.actions; len(got) != len(wantAdds) || got[0] != wantAdds[0] || got[1] != wantAdds[1] {
 		t.Fatalf("unexpected gateway A add actions: %#v", got)
 	}
 	if got := deviceB.actions; len(got) != len(wantAdds) || got[0] != wantAdds[0] || got[1] != wantAdds[1] {
 		t.Fatalf("unexpected gateway B add actions: %#v", got)
 	}
-	wantDeletes := []string{"delete:TCP:4661", "delete:UDP:4662"}
+	wantDeletes := []string{"delete:TCP:4661", "delete:TCP:4664", "delete:UDP:4662"}
 	if got := deviceA.deleteActions; len(got) != len(wantDeletes) || got[0] != wantDeletes[0] || got[1] != wantDeletes[1] {
 		t.Fatalf("unexpected gateway A delete actions: %#v", got)
 	}
@@ -119,14 +119,45 @@ func TestDesiredUPnPPortMappings(t *testing.T) {
 	settings.EnableDHT = true
 
 	mappings := desiredUPnPPortMappings(settings)
-	if len(mappings) != 2 {
-		t.Fatalf("expected 2 mappings, got %d", len(mappings))
+	if len(mappings) != 3 {
+		t.Fatalf("expected 3 mappings, got %d", len(mappings))
 	}
 	if mappings[0].protocol != internalupnp.TCP || mappings[0].port != 4661 {
 		t.Fatalf("unexpected tcp mapping: %+v", mappings[0])
 	}
-	if mappings[1].protocol != internalupnp.UDP || mappings[1].port != 4662 {
-		t.Fatalf("unexpected udp mapping: %+v", mappings[1])
+	if mappings[1].protocol != internalupnp.TCP || mappings[1].port != 4664 {
+		t.Fatalf("unexpected obfuscated tcp mapping: %+v", mappings[1])
+	}
+	if mappings[2].protocol != internalupnp.UDP || mappings[2].port != 4662 {
+		t.Fatalf("unexpected udp mapping: %+v", mappings[2])
+	}
+
+	settings.EnableDHTv6 = true
+	settings.UDPPortV6 = 4672
+	mappings = desiredUPnPPortMappings(settings)
+	if len(mappings) != 4 {
+		t.Fatalf("expected 4 mappings with kadv6, got %d", len(mappings))
+	}
+	if mappings[3].protocol != internalupnp.UDP || mappings[3].port != 4672 {
+		t.Fatalf("unexpected udp6 mapping: %+v", mappings[3])
+	}
+
+	settings.ObfuscationTCPPort = 4661
+	mappings = desiredUPnPPortMappings(settings)
+	if len(mappings) != 3 {
+		t.Fatalf("expected 3 mappings when obfuscation port equals listen port, got %d", len(mappings))
+	}
+	tcpCount := 0
+	for _, mapping := range mappings {
+		if mapping.protocol == internalupnp.TCP {
+			tcpCount++
+			if mapping.port != 4661 {
+				t.Fatalf("unexpected tcp port %+v", mapping)
+			}
+		}
+	}
+	if tcpCount != 1 {
+		t.Fatalf("expected single tcp mapping, got %d", tcpCount)
 	}
 }
 

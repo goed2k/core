@@ -785,6 +785,7 @@ func (t *Transfer) finished() {
 		t.session.tryAddCompletedTransferToSharedStore(t)
 		t.session.PublishTransferToServer(t)
 		t.session.PublishTransferToKAD(t)
+		t.session.PublishTransferToKADV6(t)
 	}
 	t.needSaveResumeData = true
 }
