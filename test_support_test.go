@@ -21,9 +21,9 @@ func skipUnlessLiveNetwork(t *testing.T) {
 
 func jed2kServerMetFixturePath(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "jed2k", "core", "src", "main", "resources", "server.met")
+	path := filepath.Join("testdata", "server.met")
 	if _, err := os.Stat(path); err != nil {
-		t.Skipf("跳过：外部 jed2k fixture 不可用 (%s): %v", path, err)
+		t.Skipf("跳过：内嵌 server.met fixture 不可用 (%s): %v", path, err)
 	}
 	return path
 }

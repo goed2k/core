@@ -67,10 +67,16 @@ GOED2K_RUN_KADV6_INTEGRATION=1 go test -run KADV6PublishSearchPipelineLive -coun
 ### 安全与混淆开关（CLI）
 
 ```bash
-goed2k --crypt-layer --sec-ident --identity-key ./identity.pem
+goed2k --crypt-layer --crypt-layer-required --sec-ident --identity-key ./identity.pem \
+  --credits-only-verified --max-download-rate-kb 1024 \
+  --categories 'video:mp4,mkv:/videos;music:mp3:/music'
 ```
 
-TUI 设置页（`/setting`）亦可切换 CryptLayer、SecIdent 并配置 identity key 路径。
+TUI 设置页（`/setting`）亦可配置上述选项。
+
+### Web API
+
+`goed2k-web` 提供 REST 接口：`/status`、`/settings`、`/dht`、`/dhtv6`、`/search`、`/shared`、`/transfers`。
 
 ## 安装
 

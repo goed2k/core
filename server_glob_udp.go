@@ -9,11 +9,11 @@ import (
 
 // eD2k 客户端向服务器 UDP（通常为 TCP+4）请求全局统计，与 ed2ksrv OP_GLOBSERVSTATREQ/RES 对应。
 const (
-	ed2kUDPHeader     byte = 0xe3
-	opGlobServStatReq byte = 0x96
-	opGlobServStatRes byte = 0x97
-	serverUDPPortOffset    = 4
-	globUDPThrottleMs      = int64(45000)
+	ed2kUDPHeader       byte = 0xe3
+	opGlobServStatReq   byte = 0x96
+	opGlobServStatRes   byte = 0x97
+	serverUDPPortOffset      = 4
+	globUDPThrottleMs        = int64(45000)
 )
 
 type globUDPChallengeEntry struct {

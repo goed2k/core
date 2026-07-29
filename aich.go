@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	AICHBlockSize       = 180 * 1024
-	AICHPieceSize       = int64(9728000)
-	AICHBlocksPerPiece  = 53
-	AICHLastBlockSize   = AICHPieceSize - int64(AICHBlocksPerPiece-1)*AICHBlockSize
+	AICHBlockSize      = 180 * 1024
+	AICHPieceSize      = int64(9728000)
+	AICHBlocksPerPiece = 53
+	AICHLastBlockSize  = AICHPieceSize - int64(AICHBlocksPerPiece-1)*AICHBlockSize
 )
 
 // ComputeAICHHash returns the SHA-1 block hash for a single AICH sub-block.

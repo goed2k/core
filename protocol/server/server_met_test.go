@@ -9,8 +9,7 @@ import (
 
 func TestLoadServerMetFixtures(t *testing.T) {
 	fixtures := []string{
-		filepath.Join("..", "..", "..", "jed2k", "core", "src", "main", "resources", "server.met"),
-		filepath.Join("..", "..", "..", "jed2k", "core", "src", "main", "resources", "server2.met"),
+		filepath.Join("..", "..", "testdata", "server.met"),
 	}
 	for _, path := range fixtures {
 		if _, err := os.Stat(path); err != nil {

@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            ext: ""
+          - goos: windows
+            ext: .exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          GOOS=${{ matrix.goos }} GOARCH=amd64 go build -ldflags="-s -w" \
+            -o dist/goed2k-${{ github.ref_name }}-${{ matrix.goos }}-amd64${{ matrix.ext }} ./cmd/goed2k
+          GOOS=${{ matrix.goos }} GOARCH=amd64 go build -ldflags="-s -w" \
+            -o dist/goed2k-web-${{ github.ref_name }}-${{ matrix.goos }}-amd64${{ matrix.ext }} ./cmd/goed2k-web
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}
+          path: dist/*
+
+  github-release:
+    name: GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

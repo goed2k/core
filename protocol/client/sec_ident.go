@@ -9,7 +9,7 @@ import (
 
 const (
 	SecIdentMaxPubKeyLen = 512
-	SecIdentMaxSigLen   = 512
+	SecIdentMaxSigLen    = 512
 )
 
 type PublicKey struct {

@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/disk"
@@ -19,6 +20,7 @@ type Transfer struct {
 	size               int64
 	numPieces          int
 	filePath           string
+	fileComment        string
 	stat               Statistics
 	closedStat         Statistics
 	picker             PiecePicker
@@ -52,6 +54,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		size:               atp.Size,
 		numPieces:          int(DivCeil(atp.Size, PieceSize)),
 		filePath:           atp.FilePath,
+		fileComment:        strings.TrimSpace(atp.FileComment),
 		stat:               NewStatistics(),
 		closedStat:         NewStatistics(),
 		hashSet:            make([]protocol.Hash, 0),
@@ -129,6 +132,13 @@ func (t *Transfer) FileName() string {
 		return t.hash.String()
 	}
 	return filepath.Base(path)
+}
+
+func (t *Transfer) FileComment() string {
+	if t == nil {
+		return ""
+	}
+	return t.fileComment
 }
 
 func (t *Transfer) UploadPriority() UploadPriority {

@@ -16,11 +16,11 @@ const (
 )
 
 type PeerInfo struct {
-	UserHash         protocol.Hash
-	NickName         string
-	Connected        bool
-	TotalUploaded    uint64
-	TotalDownloaded  uint64
+	UserHash             protocol.Hash
+	NickName             string
+	Connected            bool
+	TotalUploaded        uint64
+	TotalDownloaded      uint64
 	DownloadSpeed        int
 	PayloadDownloadSpeed int
 	UploadSpeed          int

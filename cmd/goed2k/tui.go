@@ -37,7 +37,7 @@ type tuiModel struct {
 	cfg           runConfig
 	targetPaths   []string
 	includeDHT    bool
-	includeDHTv6 bool
+	includeDHTv6  bool
 	deadline      time.Time
 	width         int
 	height        int

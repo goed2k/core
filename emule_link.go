@@ -14,11 +14,11 @@ import (
 type LinkType string
 
 const (
-	LinkServer  LinkType = "SERVER"
-	LinkServers LinkType = "SERVERS"
-	LinkNodes       LinkType = "NODES"
-	LinkFile        LinkType = "FILE"
-	LinkCollection  LinkType = "COLLECTION"
+	LinkServer     LinkType = "SERVER"
+	LinkServers    LinkType = "SERVERS"
+	LinkNodes      LinkType = "NODES"
+	LinkFile       LinkType = "FILE"
+	LinkCollection LinkType = "COLLECTION"
 )
 
 type EMuleLink struct {

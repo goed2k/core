@@ -18,10 +18,10 @@ type ServerConnection struct {
 	auxPort            int32
 	reportedIP         uint32
 	obfuscationTCPPort uint32
-	statusUsers          int32
-	statusFiles          int32
-	lastGlobUDPQuery     int64
-	combiner             protocol.PacketCombiner
+	statusUsers        int32
+	statusFiles        int32
+	lastGlobUDPQuery   int64
+	combiner           protocol.PacketCombiner
 }
 
 func NewServerConnection(identifier string, address *net.TCPAddr, session *Session) *ServerConnection {

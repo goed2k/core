@@ -18,15 +18,15 @@ import (
 const (
 	SecIdentWireVersion = 1
 
-	SecIdentStateUnavailable      = 0
-	SecIdentStateSignatureNeeded  = 1
-	SecIdentStateKeyAndSigNeeded  = 2
+	SecIdentStateUnavailable     = 0
+	SecIdentStateSignatureNeeded = 1
+	SecIdentStateKeyAndSigNeeded = 2
 
-	maxSecIdentPubKeyLen  = 512
-	maxSecIdentSigLen     = 512
-	minSecIdentPubKeyLen  = 10
-	identityKeyBits       = 2048
-	identityPEMBlockType  = "RSA PRIVATE KEY"
+	maxSecIdentPubKeyLen = 512
+	maxSecIdentSigLen    = 512
+	minSecIdentPubKeyLen = 10
+	identityKeyBits      = 2048
+	identityPEMBlockType = "RSA PRIVATE KEY"
 )
 
 var (
