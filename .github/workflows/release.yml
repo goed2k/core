@@ -32,8 +32,6 @@ jobs:
           mkdir -p dist
           GOOS=${{ matrix.goos }} GOARCH=amd64 go build -ldflags="-s -w" \
             -o dist/goed2k-${{ github.ref_name }}-${{ matrix.goos }}-amd64${{ matrix.ext }} ./cmd/goed2k
-          GOOS=${{ matrix.goos }} GOARCH=amd64 go build -ldflags="-s -w" \
-            -o dist/goed2k-web-${{ github.ref_name }}-${{ matrix.goos }}-amd64${{ matrix.ext }} ./cmd/goed2k-web
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

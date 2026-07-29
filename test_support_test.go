@@ -27,3 +27,16 @@ func jed2kServerMetFixturePath(t *testing.T) string {
 	}
 	return path
 }
+
+// registerTransferFileCleanup 在测试结束时关闭传输任务占用的文件句柄（Windows 上 TempDir 清理需要）。
+func registerTransferFileCleanup(t *testing.T, handles ...TransferHandle) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, handle := range handles {
+			if !handle.IsValid() || handle.transfer == nil || handle.transfer.handler == nil {
+				continue
+			}
+			_ = handle.transfer.handler.Close()
+		}
+	})
+}
