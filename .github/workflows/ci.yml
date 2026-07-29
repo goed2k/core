@@ -57,6 +57,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
+        shell: bash
         run: go test -timeout 5m -race -count=1 -coverprofile=coverage.out ./...
 
       - name: Coverage summary
