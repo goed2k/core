@@ -50,8 +50,10 @@ type Session struct {
 	downloadLimiter          *downloadRateLimiter
 	activeSearch             *searchTask
 	nextSearchID             uint32
-	lastKadPublishEndpoint   protocol.Endpoint
-	lastKadPeriodicPublishAt int64
+	lastKadPublishEndpoint      protocol.Endpoint
+	lastKadPeriodicPublishAt    int64
+	lastKadv6PublishTCPAddr     *net.TCPAddr
+	lastKadv6PeriodicPublishAt  int64
 	sharedStore              *SharedStore
 	sharedDirs               []string
 	serverMetMeta     map[string]serverMetEntryMeta
@@ -542,6 +544,7 @@ func (s *Session) SecondTick(currentSessionTime, tickIntervalMS int64) {
 	}
 	s.tickSearches(currentSessionTime)
 	s.maybePeriodicKadPublish(currentSessionTime)
+	s.maybePeriodicKadv6Publish(currentSessionTime)
 	s.maybePollServerGlobUDP(currentSessionTime)
 	s.processDiskTasks()
 	s.accumulator.SecondTick(tickIntervalMS)
@@ -1115,6 +1118,7 @@ func (s *Session) OnServerIDChange(sc *ServerConnection, clientID, tcpFlags, aux
 		sc.SendOfferFiles(&packet)
 	}
 	s.publishAllFinishedTransfersKADAfterServerChange()
+	s.publishAllFinishedTransfersKADV6AfterServerChange()
 	for _, transfer := range kick {
 		s.RequestSourcesNow(transfer)
 	}

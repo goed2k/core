@@ -144,8 +144,18 @@ func (m *upnpPortMapper) Close() error {
 	return errors.Join(errs...)
 }
 
+func obfuscationPortForSettings(settings Settings) int {
+	if settings.ObfuscationTCPPort > 0 {
+		return settings.ObfuscationTCPPort
+	}
+	if settings.ListenPort > 0 {
+		return settings.ListenPort + 3
+	}
+	return 0
+}
+
 func desiredUPnPPortMappings(settings Settings) []upnpPortMapping {
-	mappings := make([]upnpPortMapping, 0, 2)
+	mappings := make([]upnpPortMapping, 0, 4)
 	if settings.ListenPort > 0 {
 		mappings = append(mappings, upnpPortMapping{
 			protocol: internalupnp.TCP,
@@ -153,11 +163,25 @@ func desiredUPnPPortMappings(settings Settings) []upnpPortMapping {
 			name:     "goed2k TCP",
 		})
 	}
+	if obfPort := obfuscationPortForSettings(settings); obfPort > 0 && obfPort != settings.ListenPort {
+		mappings = append(mappings, upnpPortMapping{
+			protocol: internalupnp.TCP,
+			port:     obfPort,
+			name:     "goed2k TCP obfuscated",
+		})
+	}
 	if settings.EnableDHT && settings.UDPPort > 0 {
 		mappings = append(mappings, upnpPortMapping{
 			protocol: internalupnp.UDP,
 			port:     settings.UDPPort,
 			name:     "goed2k UDP",
+		})
+	}
+	if settings.EnableDHTv6 && settings.UDPPortV6 > 0 {
+		mappings = append(mappings, upnpPortMapping{
+			protocol: internalupnp.UDP,
+			port:     settings.UDPPortV6,
+			name:     "goed2k UDP6",
 		})
 	}
 	return mappings
