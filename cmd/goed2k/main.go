@@ -181,7 +181,7 @@ func setupClient(cfg runConfig) (*appContext, error) {
 
 	app := &appContext{
 		client:       client,
-		targetPaths:  nil,
+		targetPaths:  snapshotPathsFromClient(client),
 		includeDHT:   cfg.enableKAD,
 		includeDHTv6: cfg.enableKADV6,
 		noticeCh:     make(chan string, 32),
@@ -191,6 +191,19 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	}
 	bootstrap.RunBackground(client, bcfg, app.notify)
 	return app, nil
+}
+
+func snapshotPathsFromClient(client *ed2k.Client) []string {
+	if client == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(client.Status().Transfers))
+	for _, tr := range client.Status().Transfers {
+		if tr.FilePath != "" {
+			paths = append(paths, tr.FilePath)
+		}
+	}
+	return paths
 }
 
 func (a *appContext) notify(format string, args ...any) {

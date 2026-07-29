@@ -246,6 +246,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncTransfers()
 		m.syncSearchResults()
 		m.syncShared()
+		if next, cmd := m.applyAutoExit(); cmd != nil {
+			return next, cmd
+		}
 		return m, waitStatusCmd(m.statusEvents)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
