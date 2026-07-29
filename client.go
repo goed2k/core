@@ -72,6 +72,14 @@ func (c *Client) Session() *Session {
 	return c.session
 }
 
+// LoadIdentity 从 PEM 文件加载或创建 Secure Ident 密钥对。
+func (c *Client) LoadIdentity(path string) error {
+	if c == nil || c.session == nil {
+		return errors.New("client is nil")
+	}
+	return c.session.LoadIdentity(path)
+}
+
 func (c *Client) SetDHTv6Tracker(tracker *KADV6Tracker) {
 	c.session.SetDHTv6Tracker(tracker)
 }

@@ -29,9 +29,9 @@
 - [x] UPNP 端口映射（含混淆 TCP 与 KADV6 UDP）
 - [x] 客户端间来源交换（Source Exchange）
 - [x] Server / Kad Callback（低 ID 穿透）
-- [x] 协议混淆 CryptLayer（默认关闭，库 API 可启用）
+- [x] 协议混淆 CryptLayer（`--crypt-layer`，默认关闭）
 - [x] AICH 损坏块检测与恢复
-- [x] Secure Ident 安全身份（默认关闭）
+- [x] Secure Ident 安全身份（`--sec-ident`、`--identity-key`，默认关闭）
 - [x] 上传 zlib 压缩与下载限速
 - [x] 本地共享库、Server OfferFiles、KAD/KADV6 发布
 - [x] Kad 关键字/Notes 搜索、Collection 链接
@@ -52,14 +52,25 @@
 ## 开发与测试
 
 ```bash
-# 默认单元测试（跳过外网联调与外部 fixture）
+# 默认单元测试（CI 同款，跳过外网联调）
 go test -race -count=1 ./...
 
 # 运行外网联调测试（需可访问 ED2K 网络）
 GOED2K_RUN_LIVE_TESTS=1 go test -run LiveDownload -count=1 .
+
+# 运行 KADV6 IPv6 联调（需本机 IPv6 出站）
+GOED2K_RUN_KADV6_INTEGRATION=1 go test -run KADV6PublishSearchPipelineLive -count=1 .
 ```
 
 推送至 `main` 或提交 Pull Request 时，GitHub Actions 会自动运行 `go vet`、全量单元测试与构建检查。
+
+### 安全与混淆开关（CLI）
+
+```bash
+goed2k --crypt-layer --sec-ident --identity-key ./identity.pem
+```
+
+TUI 设置页（`/setting`）亦可切换 CryptLayer、SecIdent 并配置 identity key 路径。
 
 ## 安装
 

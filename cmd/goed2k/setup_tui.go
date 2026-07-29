@@ -633,13 +633,14 @@ type settingsModel struct {
 	peerTimeoutInput       textinput.Model
 	maxDownloadRateKBInput textinput.Model
 	timeoutInput           textinput.Model
+	identityKeyInput       textinput.Model
 	cfg                    runConfig
 	focus                  int
 	status                 string
 	submitted              bool
 }
 
-const settingsFocusCount = 17
+const settingsFocusCount = 20
 
 func runSettingsTUI(initial runConfig) (runConfig, error) {
 	model := newSettingsModel(initial)
@@ -679,6 +680,7 @@ func newSettingsModel(cfg runConfig) settingsModel {
 		timeoutValue = cfg.timeout.String()
 	}
 	m.timeoutInput = newSetupInput("0 or 30m", timeoutValue)
+	m.identityKeyInput = newSetupInput("path/to/identity.pem", cfg.identityKeyPath)
 	m.syncFocus()
 	return m
 }
@@ -714,8 +716,16 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg.enableKADV6 = !m.cfg.enableKADV6
 				return m, nil
 			}
-		case "enter":
 			if m.focus == 16 {
+				m.cfg.enableCryptLayer = !m.cfg.enableCryptLayer
+				return m, nil
+			}
+			if m.focus == 17 {
+				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
+				return m, nil
+			}
+		case "enter":
+			if m.focus == 19 {
 				next, cmd := m.submit()
 				return next, cmd
 			}
@@ -729,6 +739,14 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == 5 {
 				m.cfg.enableKADV6 = !m.cfg.enableKADV6
+				return m, nil
+			}
+			if m.focus == 16 {
+				m.cfg.enableCryptLayer = !m.cfg.enableCryptLayer
+				return m, nil
+			}
+			if m.focus == 17 {
+				m.cfg.enableSecIdent = !m.cfg.enableSecIdent
 				return m, nil
 			}
 			m.focus = (m.focus + 1) % settingsFocusCount
@@ -765,6 +783,8 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.maxDownloadRateKBInput, cmd = m.maxDownloadRateKBInput.Update(msg)
 	case 15:
 		m.timeoutInput, cmd = m.timeoutInput.Update(msg)
+	case 18:
+		m.identityKeyInput, cmd = m.identityKeyInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -789,9 +809,12 @@ func (m settingsModel) View() string {
 		m.renderField(13, "Peer timeout", m.peerTimeoutInput.View()),
 		m.renderField(14, "DL rate KB/s", m.maxDownloadRateKBInput.View()),
 		m.renderField(15, "Timeout", m.timeoutInput.View()),
-		m.renderStart(16, "[ Save settings ]"),
+		m.renderToggle(16, "CryptLayer", m.cfg.enableCryptLayer),
+		m.renderToggle(17, "SecIdent", m.cfg.enableSecIdent),
+		m.renderField(18, "Identity key", m.identityKeyInput.View()),
+		m.renderStart(19, "[ Save settings ]"),
 		"",
-		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP/KADV6 • Enter save • q quit"),
+		footerStyle.Render("Tab/Shift+Tab move • Space toggle KAD/UPNP/KADV6/Crypt/SecIdent • Enter save • q quit"),
 	}
 	if strings.TrimSpace(m.status) != "" {
 		lines = append(lines, footerStyle.Render(m.status))
@@ -845,6 +868,7 @@ func (m *settingsModel) syncFocus() {
 		&m.peerTimeoutInput,
 		&m.maxDownloadRateKBInput,
 		&m.timeoutInput,
+		&m.identityKeyInput,
 	}
 	for _, input := range inputs {
 		input.Blur()
@@ -876,6 +900,8 @@ func (m *settingsModel) syncFocus() {
 		m.maxDownloadRateKBInput.Focus()
 	case 15:
 		m.timeoutInput.Focus()
+	case 18:
+		m.identityKeyInput.Focus()
 	}
 }
 
@@ -927,6 +953,7 @@ func (m *settingsModel) submit() (settingsModel, tea.Cmd) {
 	cfg.peerTimeout = peerTimeout
 	cfg.maxDownloadRateKB = maxDownloadRateKB
 	cfg.timeout = timeout
+	cfg.identityKeyPath = strings.TrimSpace(m.identityKeyInput.Value())
 	m.cfg = cfg
 	m.submitted = true
 	return *m, tea.Quit
