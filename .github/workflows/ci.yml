@@ -60,9 +60,7 @@ jobs:
         run: go test -timeout 5m -race -count=1 ./...
 
       - name: Build binaries
-        run: |
-          go build ./cmd/goed2k
-          go build ./cmd/goed2k-web
+        run: go build ./cmd/goed2k
 
       - name: Build examples
         run: go build ./examples/...

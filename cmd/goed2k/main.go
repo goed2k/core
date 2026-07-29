@@ -9,14 +9,7 @@ import (
 	"time"
 
 	ed2k "github.com/goed2k/core"
-)
-
-const (
-	// from https://www.emule-security.org/serverlist/
-	defaultServerList = "45.82.80.155:5687,176.123.5.89:4725,85.121.5.137:4232,176.123.2.239:4232,145.239.2.134:4661,91.208.162.87:4232,37.15.61.236:4232"
-	defaultServerMet  = "ed2k://|serverlist|http://upd.emule-security.org/server.met|/"
-	// from https://www.nodes-dat.com/
-	defaultNodesDat = "http://www.alldivx.de/nodes/nodes.dat,https://upd.emule-security.org/nodes.dat"
+	"github.com/goed2k/core/internal/bootstrap"
 )
 
 type runConfig struct {
@@ -43,6 +36,21 @@ type runConfig struct {
 	peerTimeout              int
 	maxDownloadRateKB        int
 	timeout                  time.Duration
+	statePath                string
+	disableState             bool
+}
+
+type linksFlag []string
+
+func (f *linksFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *linksFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("link is empty")
+	}
+	*f = append(*f, value)
+	return nil
 }
 
 type appContext struct {
@@ -56,6 +64,20 @@ type appContext struct {
 
 func main() {
 	cfg := defaultRunConfig()
+	var links linksFlag
+	var setupWizard bool
+	var timeoutRaw string
+
+	flag.BoolVar(&setupWizard, "setup", false, "run interactive setup wizard before starting")
+	flag.StringVar(&cfg.outDir, "out-dir", cfg.outDir, "default download directory")
+	flag.StringVar(&cfg.serverAddr, "server", cfg.serverAddr, "ED2K servers (comma-separated host:port)")
+	flag.StringVar(&cfg.serverMetPath, "server-met", cfg.serverMetPath, "server.met path, URL, or ed2k serverlist link")
+	flag.BoolVar(&cfg.enableKAD, "kad", cfg.enableKAD, "enable KAD DHT (use -kad=false to disable)")
+	flag.BoolVar(&cfg.enableUPnP, "upnp", cfg.enableUPnP, "enable UPnP port mapping (use -upnp=false to disable)")
+	flag.IntVar(&cfg.listenPort, "listen-port", cfg.listenPort, "TCP listen port")
+	flag.IntVar(&cfg.udpPort, "udp-port", cfg.udpPort, "KAD UDP listen port")
+	flag.StringVar(&cfg.kadNodesDat, "kad-nodes-dat", cfg.kadNodesDat, "KAD nodes.dat path or URL")
+	flag.StringVar(&cfg.kadNodes, "kad-bootstrap", cfg.kadNodes, "KAD bootstrap nodes (comma-separated udp-host:port)")
 	flag.BoolVar(&cfg.enableKADV6, "kadv6", cfg.enableKADV6, "enable KADV6 IPv6 DHT")
 	flag.BoolVar(&cfg.enableCryptLayer, "crypt-layer", cfg.enableCryptLayer, "enable TCP protocol obfuscation (CryptLayer)")
 	flag.BoolVar(&cfg.enableCryptLayerRequired, "crypt-layer-required", cfg.enableCryptLayerRequired, "require CryptLayer for peer connections")
@@ -67,7 +89,36 @@ func main() {
 	flag.IntVar(&cfg.udpPortV6, "udp-port-v6", cfg.udpPortV6, "KADV6 UDP listen port")
 	flag.StringVar(&cfg.kadv6NodesDat, "kadv6-nodes-dat", cfg.kadv6NodesDat, "KADV6 nodes6.dat path or URL")
 	flag.StringVar(&cfg.kadv6Nodes, "kadv6-bootstrap", cfg.kadv6Nodes, "KADV6 bootstrap nodes")
+	flag.IntVar(&cfg.peerTimeout, "peer-timeout", cfg.peerTimeout, "peer connection timeout in seconds")
+	flag.StringVar(&timeoutRaw, "timeout", "", "exit after duration when all transfers complete (e.g. 30m, 0=disabled)")
+	flag.StringVar(&cfg.statePath, "state-path", cfg.statePath, "path to JSON state file for persistence")
+	flag.BoolVar(&cfg.disableState, "no-state", cfg.disableState, "disable state persistence")
+	flag.Var(&links, "link", "ed2k link to queue at startup (repeatable)")
 	flag.Parse()
+
+	if len(links) > 0 {
+		cfg.links = append(cfg.links, links...)
+	}
+	if strings.TrimSpace(timeoutRaw) != "" {
+		d, err := time.ParseDuration(timeoutRaw)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid --timeout: %v\n", err)
+			os.Exit(1)
+		}
+		cfg.timeout = d
+	}
+
+	if setupWizard {
+		next, err := runSetupTUI(cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		cfg = next
+		if len(links) > 0 {
+			cfg.links = append(cfg.links, links...)
+		}
+	}
 
 	app, err := setupClient(cfg)
 	if err != nil {
@@ -87,18 +138,20 @@ func main() {
 }
 
 func defaultRunConfig() runConfig {
+	base := bootstrap.DefaultConfig()
 	return runConfig{
-		outDir:        ".",
-		serverAddr:    defaultServerList,
-		serverMetPath: defaultServerMet,
-		listenPort:    4661,
-		udpPort:       4662,
-		udpPortV6:     4672,
-		enableKAD:     true,
-		enableKADV6:   false,
-		enableUPnP:    true,
-		kadNodesDat:   defaultNodesDat,
-		peerTimeout:   30,
+		outDir:        base.OutDir,
+		serverAddr:    base.ServerAddr,
+		serverMetPath: base.ServerMetPath,
+		listenPort:    base.ListenPort,
+		udpPort:       base.UDPPort,
+		udpPortV6:     base.UDPPortV6,
+		enableKAD:     base.EnableKAD,
+		enableKADV6:   base.EnableKADV6,
+		enableUPnP:    base.EnableUPnP,
+		kadNodesDat:   base.KADNodesDat,
+		peerTimeout:   base.PeerTimeout,
+		statePath:     base.StatePath,
 	}
 }
 
@@ -113,53 +166,17 @@ func configureFileLogger() (*slog.Logger, error) {
 }
 
 func setupClient(cfg runConfig) (*appContext, error) {
-	settings := ed2k.NewSettings()
-	logger, err := configureFileLogger()
-	if err != nil {
+	bcfg := cfg.bootstrapConfig()
+	var logger *slog.Logger
+	if l, err := configureFileLogger(); err != nil {
 		fmt.Fprintf(os.Stderr, "logger init failed: %v\n", err)
 	} else {
-		settings.Logger = logger
-	}
-	settings.ReconnectToServer = true
-	settings.ListenPort = cfg.listenPort
-	settings.UDPPort = cfg.udpPort
-	settings.UDPPortV6 = cfg.udpPortV6
-	settings.EnableDHT = cfg.enableKAD
-	settings.EnableDHTv6 = cfg.enableKADV6
-	settings.EnableUPnP = cfg.enableUPnP
-	settings.EnableCryptLayer = cfg.enableCryptLayer
-	settings.CryptLayerRequired = cfg.enableCryptLayerRequired
-	settings.EnableSecIdent = cfg.enableSecIdent
-	settings.CreditsOnlyVerified = cfg.creditsOnlyVerified
-	settings.IdentityKeyPath = cfg.identityKeyPath
-	settings.PeerConnectionTimeout = cfg.peerTimeout
-	settings.MaxDownloadRateKB = cfg.maxDownloadRateKB
-	if cfg.categoriesConfig != "" {
-		cats, err := ed2k.ParseCategoriesConfig(cfg.categoriesConfig)
-		if err != nil {
-			return nil, fmt.Errorf("parse categories: %w", err)
-		}
-		settings.Categories = cats
+		logger = l
 	}
 
-	client := ed2k.NewClient(settings)
-	if cfg.enableKAD {
-		client.EnableDHT()
-	}
-	if cfg.enableKADV6 {
-		client.EnableDHTv6()
-	}
-	identityPath := strings.TrimSpace(cfg.identityKeyPath)
-	if cfg.enableSecIdent {
-		identityPath = ed2k.EnsureIdentityKeyForSecIdent(&settings)
-	}
-	if identityPath != "" {
-		if err := client.LoadIdentity(identityPath); err != nil {
-			return nil, fmt.Errorf("load identity key: %w", err)
-		}
-	}
-	if err := client.Start(); err != nil {
-		return nil, fmt.Errorf("listen failed on port %d: %w", settings.ListenPort, err)
+	client, err := bootstrap.InitClient(bcfg, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	app := &appContext{
@@ -172,82 +189,8 @@ func setupClient(cfg runConfig) (*appContext, error) {
 	if cfg.timeout > 0 {
 		app.deadline = time.Now().Add(cfg.timeout)
 	}
-	startBackgroundBootstrap(app, cfg)
+	bootstrap.RunBackground(client, bcfg, app.notify)
 	return app, nil
-}
-
-func startBackgroundBootstrap(app *appContext, cfg runConfig) {
-	if app == nil || app.client == nil {
-		return
-	}
-	if cfg.serverAddr != "" {
-		go connectServersBestEffort(app, splitCommaList(cfg.serverAddr))
-	}
-	if cfg.serverMetPath != "" {
-		go loadServerMetBestEffort(app, splitCommaList(cfg.serverMetPath))
-	}
-	if cfg.enableKAD && cfg.kadNodesDat != "" {
-		go func() {
-			if err := app.client.LoadDHTNodesDat(cfg.kadNodesDat); err != nil {
-				app.notify("KAD nodes.dat unavailable: %v", err)
-			}
-		}()
-	}
-	if cfg.enableKAD && cfg.kadNodes != "" {
-		go func() {
-			if err := app.client.AddDHTBootstrapNodes(cfg.kadNodes); err != nil {
-				app.notify("KAD bootstrap nodes ignored: %v", err)
-			}
-		}()
-	}
-	if cfg.enableKADV6 && cfg.kadv6NodesDat != "" {
-		go func() {
-			if err := app.client.LoadDHTv6NodesDat(cfg.kadv6NodesDat); err != nil {
-				app.notify("KADV6 nodes6.dat unavailable: %v", err)
-			}
-		}()
-	}
-	if cfg.enableKADV6 && cfg.kadv6Nodes != "" {
-		go func() {
-			if err := app.client.AddDHTv6BootstrapNodes(cfg.kadv6Nodes); err != nil {
-				app.notify("KADV6 bootstrap nodes ignored: %v", err)
-			}
-		}()
-	}
-}
-
-func loadServerMetBestEffort(app *appContext, sources []string) {
-	for _, item := range sources {
-		entries, err := app.client.LoadServerMet(item)
-		if err != nil {
-			app.notify("server.met unavailable: %v", err)
-			continue
-		}
-		addrs := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			if addr := entry.Address(); addr != "" {
-				addrs = append(addrs, addr)
-			}
-		}
-		connectServersBestEffort(app, addrs)
-	}
-}
-
-func connectServersBestEffort(app *appContext, servers []string) {
-	seen := make(map[string]struct{}, len(servers))
-	for _, serverAddr := range servers {
-		serverAddr = strings.TrimSpace(serverAddr)
-		if serverAddr == "" {
-			continue
-		}
-		if _, ok := seen[serverAddr]; ok {
-			continue
-		}
-		seen[serverAddr] = struct{}{}
-		if err := app.client.Connect(serverAddr); err != nil {
-			app.notify("server unavailable: %s (%v)", serverAddr, err)
-		}
-	}
 }
 
 func (a *appContext) notify(format string, args ...any) {
@@ -276,17 +219,6 @@ func (a *appContext) drainNotices() []string {
 			return messages
 		}
 	}
-}
-
-func splitCommaList(value string) []string {
-	parts := make([]string, 0, 4)
-	for _, item := range strings.Split(value, ",") {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			parts = append(parts, item)
-		}
-	}
-	return parts
 }
 
 func completionMessage(paths []string) string {

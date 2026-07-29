@@ -12,7 +12,14 @@ import (
 	"github.com/goed2k/core/internal/webapi"
 )
 
+// goed2k-web 是早期简易 REST 示例，已废弃。
+// 请改用：
+//   - 后端：https://github.com/goed2k/daemon （goed2kd，/api/v1 + WebSocket）
+//   - 前端：https://github.com/goed2k/webui
+
 func main() {
+	log.Println("DEPRECATED: goed2k-web is deprecated; use github.com/goed2k/daemon and github.com/goed2k/webui instead")
+
 	addr := envOr("GOED2K_WEB_ADDR", ":8080")
 	outDir := envOr("GOED2K_WEB_OUTDIR", ".")
 	user := os.Getenv("GOED2K_WEB_USER")
@@ -32,7 +39,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("goed2k-web listening on %s", addr)
+		log.Printf("goed2k-web listening on %s (deprecated)", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
 		}

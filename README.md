@@ -38,7 +38,8 @@
 - [x] 任务优先级、分类路由、IP 过滤与封禁
 - [x] 状态持久化与恢复、`.part.met` JSON 导出
 - [x] 可交互终端下载管理器（TUI）
-- [x] Web API 服务（`goed2k-web`）
+
+Web 控制台请使用独立仓库 [goed2k/daemon](https://github.com/goed2k/daemon) + [goed2k/webui](https://github.com/goed2k/webui)。本仓库内的 `goed2k-web` 已**废弃**，仅作历史兼容。
 
 ## 相关文档
 
@@ -74,9 +75,26 @@ goed2k --crypt-layer --crypt-layer-required --sec-ident --identity-key ./identit
 
 TUI 设置页（`/setting`）亦可配置上述选项。
 
-### Web API
+### 状态持久化与常用参数
 
-`goed2k-web` 提供 REST 接口：`/status`、`/settings`、`/dht`、`/dhtv6`、`/search`、`/shared`、`/transfers`。
+```bash
+goed2k --state-path ~/.config/goed2k/state.json \
+  --server 'host:port,host:port' \
+  --out-dir ./downloads \
+  --link 'ed2k://|file|...|/' \
+  --setup   # 可选：启动前进入设置向导
+```
+
+默认状态文件：`~/.config/goed2k/state.json`（可用 `--no-state` 关闭）。退出时自动保存任务与积分等。
+
+### Web 控制台（daemon + webui）
+
+| 组件 | 仓库 | 说明 |
+|------|------|------|
+| 守护进程 | [goed2k/daemon](https://github.com/goed2k/daemon) | `goed2kd`，HTTP `/api/v1` + WebSocket 事件 |
+| 浏览器 UI | [goed2k/webui](https://github.com/goed2k/webui) | React 控制台，对接 daemon API |
+
+> **已废弃**：`cmd/goed2k-web` 不再维护，Release 不再分发其二进制。
 
 ## 安装
 
