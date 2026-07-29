@@ -18,22 +18,25 @@
 
 ## 特性
 
-`goed2k` 目前已经覆盖了一套可用的 ED2K 客户端基础能力，主要包括：
+`goed2k` 目前已经覆盖了一套可用的 ED2K/eMule 客户端能力，主要包括：
 
-- [x] ED2K 文件下载
-- [x] 多任务并发下载
-- [x] 多个 ED2K server 并发找源
-- [x] `server.met` 加载
-- [x] KAD bootstrap 和 source 查找
-- [x] UPNP 端口映射
-- [x] 资源搜索
-- [x] 暂停、继续、删除任务
-- [x] 状态持久化与恢复
-- [x] 上传支持
-- [x] 任务、peer、server、piece 状态快照
-- [x] 任务进度订阅
-- [x] 可交互的终端下载管理器
-- [x] 客户端间来源交换（Source Exchange，`OP_REQUESTSOURCES2` / `OP_ANSWERSOURCES2`）
+- [x] ED2K 文件下载与多任务并发
+- [x] 多个 ED2K server 并发找源与 `server.met` 加载
+- [x] KAD（Kad4）bootstrap、搜源与完成发布
+- [x] **KADV6**（IPv6 DHT）搜源、发布与 TUI/CLI 开关
+- [x] UPNP 端口映射（含混淆 TCP 与 KADV6 UDP）
+- [x] 客户端间来源交换（Source Exchange）
+- [x] Server / Kad Callback（低 ID 穿透）
+- [x] 协议混淆 CryptLayer（默认关闭，库 API 可启用）
+- [x] AICH 损坏块检测与恢复
+- [x] Secure Ident 安全身份（默认关闭）
+- [x] 上传 zlib 压缩与下载限速
+- [x] 本地共享库、Server OfferFiles、KAD/KADV6 发布
+- [x] Kad 关键字/Notes 搜索、Collection 链接
+- [x] 任务优先级、分类路由、IP 过滤与封禁
+- [x] 状态持久化与恢复、`.part.met` JSON 导出
+- [x] 可交互终端下载管理器（TUI）
+- [x] Web API 服务（`goed2k-web`）
 
 ## 相关文档
 
@@ -42,6 +45,7 @@
 - [Kademlia v6 协议说明（中文）](docs/kadv6-protocol-CN.md)
 - [客户端来源交换（Source Exchange）实现说明（中文）](docs/source-exchange-CN.md)
 - [Secure Ident 计划](docs/secure-ident-plan.md)
+- [版本变更记录（CHANGELOG）](CHANGELOG.md)
 
 ## 安装
 
