@@ -40,3 +40,21 @@ func registerTransferFileCleanup(t *testing.T, handles ...TransferHandle) {
 		}
 	})
 }
+
+// registerClientTransferFileCleanup 关闭 Client 上所有传输任务的文件句柄。
+func registerClientTransferFileCleanup(t *testing.T, clients ...*Client) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, client := range clients {
+			if client == nil || client.session == nil {
+				continue
+			}
+			for _, handle := range client.session.GetTransfers() {
+				if !handle.IsValid() || handle.transfer == nil || handle.transfer.handler == nil {
+					continue
+				}
+				_ = handle.transfer.handler.Close()
+			}
+		}
+	})
+}

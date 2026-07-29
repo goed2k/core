@@ -80,6 +80,11 @@ func TestCompressedPartSendRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed transfer: %v", err)
 	}
+	t.Cleanup(func() {
+		if seedTransfer != nil && seedTransfer.handler != nil {
+			_ = seedTransfer.handler.Close()
+		}
+	})
 	seedTransfer.WeHave(0)
 
 	endpoint, err := protocol.EndpointFromString("127.0.0.1", 4662)
