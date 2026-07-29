@@ -665,6 +665,13 @@ func (t *Transfer) ReadRange(begin, end int64) ([]byte, error) {
 	return t.pm.ReadRange(begin, end)
 }
 
+func (t *Transfer) throttleDownloadWrite(bytes int) {
+	if t == nil || t.session == nil || bytes <= 0 {
+		return
+	}
+	t.session.ThrottleDownload(bytes)
+}
+
 func (t *Transfer) SecondTick(accumulator *Statistics, tickIntervalMS int64) {
 	if t.NeedMoreSources() {
 		now := CurrentTime()
