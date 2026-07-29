@@ -13,6 +13,11 @@ import (
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
+type incomingConnEntry struct {
+	conn           net.Conn
+	forceObfuscated bool
+}
+
 type Session struct {
 	mu                       sync.Mutex
 	diskMu                   sync.Mutex
@@ -34,7 +39,8 @@ type Session struct {
 	diskTasks                []*diskTask
 	diskResults              chan diskTaskResult
 	listener                 *net.TCPListener
-	incomingConns            chan net.Conn
+	obfListener              *net.TCPListener
+	incomingConns            chan incomingConnEntry
 	dhtTracker               *DHTTracker
 	dhtv6Tracker             *KADV6Tracker
 	upnp                     *upnpManager
@@ -94,7 +100,7 @@ func NewSession(st Settings) *Session {
 		configuredServers:      make(map[string]*net.TCPAddr),
 		diskTasks:              make([]*diskTask, 0),
 		diskResults:            make(chan diskTaskResult, 128),
-		incomingConns:          make(chan net.Conn, 32),
+		incomingConns:          make(chan incomingConnEntry, 32),
 		credits:                NewPeerCreditManager(),
 		friendSlots:            make(map[string]bool),
 		sharedStore:            NewSharedStore(),
@@ -407,18 +413,66 @@ func (s *Session) Listen() error {
 				return
 			}
 			select {
-			case s.incomingConns <- conn:
+			case s.incomingConns <- incomingConnEntry{conn: conn}:
 			default:
 				_ = conn.Close()
 			}
 		}
 	}(listener)
+	if err := s.listenObfuscationPort(); err != nil {
+		return err
+	}
 	s.startUPnPMapping()
 	return nil
 }
 
+func (s *Session) listenObfuscationPort() error {
+	if s.obfListener != nil {
+		return nil
+	}
+	s.mu.Lock()
+	port := s.obfuscationListenPortLocked()
+	s.mu.Unlock()
+	if port <= 0 {
+		return nil
+	}
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: port})
+	if err != nil {
+		return err
+	}
+	s.obfListener = listener
+	go func(l *net.TCPListener) {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			select {
+			case s.incomingConns <- incomingConnEntry{conn: conn, forceObfuscated: true}:
+			default:
+				_ = conn.Close()
+			}
+		}
+	}(listener)
+	return nil
+}
+
+func (s *Session) obfuscationListenPortLocked() int {
+	if s.settings.ObfuscationTCPPort > 0 {
+		return s.settings.ObfuscationTCPPort
+	}
+	if s.settings.ListenPort > 0 {
+		return s.settings.ListenPort + 3
+	}
+	return 0
+}
+
 func (s *Session) CloseListener() {
 	s.stopUPnPMapping()
+	if s.obfListener != nil {
+		_ = s.obfListener.Close()
+		s.obfListener = nil
+	}
 	if s.listener == nil {
 		return
 	}
@@ -527,12 +581,12 @@ func (s *Session) PumpIO() {
 func (s *Session) acceptIncomingConnections() {
 	for {
 		select {
-		case conn := <-s.incomingConns:
-			if conn == nil {
+		case entry := <-s.incomingConns:
+			if entry.conn == nil {
 				continue
 			}
 			s.mu.Lock()
-			s.connections = append(s.connections, NewIncomingPeerConnection(s, conn))
+			s.connections = append(s.connections, NewIncomingPeerConnection(s, entry.conn, entry.forceObfuscated))
 			s.mu.Unlock()
 		default:
 			return

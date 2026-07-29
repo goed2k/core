@@ -39,6 +39,9 @@ type Settings struct {
 	DHTv6SearchTimeout      int
 	ReconnectToServer       bool
 	ServerPingTimeout       int64
+	EnableCryptLayer        bool
+	CryptLayerRequired      bool
+	ObfuscationTCPPort      int
 }
 
 func NewSettings() Settings {
@@ -77,6 +80,9 @@ func NewSettings() Settings {
 		DHTv6SearchTimeout:      8,
 		ReconnectToServer:       false,
 		ServerPingTimeout:       0,
+		EnableCryptLayer:        false,
+		CryptLayerRequired:      false,
+		ObfuscationTCPPort:      0,
 	}
 }
 

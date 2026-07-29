@@ -38,6 +38,27 @@ func (s *ServerConnection) Connect() error {
 	if s.address == nil {
 		return NewError(InternalError)
 	}
+	settings := s.session.settings
+	if settings.EnableCryptLayer && s.obfuscationTCPPort > 0 {
+		obfAddr := cloneTCPAddr(s.address)
+		obfAddr.Port = int(s.obfuscationTCPPort)
+		conn, err := net.DialTCP("tcp", nil, obfAddr)
+		if err == nil {
+			obfConn, obfErr := NewOutgoingServerObfuscatedConn(conn)
+			if obfErr == nil {
+				s.socket = obfConn
+				s.SendLoginRequest()
+				return nil
+			}
+			_ = conn.Close()
+		}
+		if settings.CryptLayerRequired {
+			if err != nil {
+				return err
+			}
+			return errObfuscationHandshake
+		}
+	}
 	if err := s.Connection.Connect(s.address); err != nil {
 		return err
 	}

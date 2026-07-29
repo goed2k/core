@@ -141,7 +141,7 @@ func TestTryAttachCallbackPeer(t *testing.T) {
 	session.transfers[hash] = transfer
 	session.callbacks[12345] = hash
 
-	pc := NewIncomingPeerConnection(session, &loopbackConn{})
+	pc := NewIncomingPeerConnection(session, &loopbackConn{}, false)
 	session.tryAttachCallbackPeer(pc, 12345)
 	if pc.transfer != transfer {
 		t.Fatal("expected incoming peer attached to transfer")

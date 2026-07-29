@@ -179,7 +179,7 @@ func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Tran
 	}
 }
 
-func NewIncomingPeerConnection(session *Session, conn net.Conn) *PeerConnection {
+func NewIncomingPeerConnection(session *Session, conn net.Conn, forceObfuscated bool) *PeerConnection {
 	pc := &PeerConnection{
 		Connection:     NewConnection(session),
 		speed:          PeerSpeedSlow,
@@ -189,7 +189,8 @@ func NewIncomingPeerConnection(session *Session, conn net.Conn) *PeerConnection 
 		uploadBlocks:   make([]RequestedUploadBlock, 0),
 		uploadDone:     make([]RequestedUploadBlock, 0),
 	}
-	pc.socket = conn
+	wrapped := WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), forceObfuscated, session.settings.CryptLayerRequired)
+	pc.socket = wrapped
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		pc.endpoint = protocol.EndpointFromInet(tcpAddr)
 	}
@@ -213,6 +214,34 @@ func (p *PeerConnection) Connect() error {
 	}
 	if err != nil {
 		return err
+	}
+	settings := p.session.settings
+	useObf := peerWantsObfuscation(p.peerInfo, settings)
+	if useObf {
+		if peerHash, ok := peerProvidesUserHash(p.peerInfo); ok {
+			if obfAddr := obfuscationDialAddr(addr, settings); obfAddr != nil {
+				addr = obfAddr
+			}
+			conn, err := net.DialTCP("tcp", nil, addr)
+			if err != nil {
+				if settings.CryptLayerRequired {
+					return err
+				}
+			} else {
+				obfConn, obfErr := NewOutgoingClientObfuscatedConn(conn, peerHash)
+				if obfErr == nil {
+					p.socket = obfConn
+					p.OnConnect()
+					return nil
+				}
+				_ = conn.Close()
+				if settings.CryptLayerRequired {
+					return obfErr
+				}
+			}
+		} else if settings.CryptLayerRequired {
+			return errObfuscationRequired
+		}
 	}
 	if err := p.Connection.Connect(addr); err != nil {
 		return err
@@ -1416,7 +1445,7 @@ func (p *PeerConnection) buildSourceExchangeEntries(peers []Peer) []clientproto.
 			ServerIP:     0,
 			ServerPort:   0,
 			UserHash:     protocol.Invalid,
-			CryptOptions: 0,
+			CryptOptions: cryptOptionsForLocal(p.session.settings),
 		})
 	}
 	return out
@@ -1435,7 +1464,13 @@ func (p *PeerConnection) HandleAnswerSources2(ans *clientproto.AnswerSources2) {
 		if !p.isAcceptableSourceExchangeEndpoint(ep) {
 			continue
 		}
-		peers = append(peers, NewPeerWithSource(ep, true, int(PeerSourceExchange)))
+		peers = append(peers, Peer{
+			Endpoint:     ep,
+			Connectable:  true,
+			SourceFlag:   int(PeerSourceExchange),
+			UserHash:     e.UserHash,
+			CryptOptions: e.CryptOptions,
+		})
 	}
 	if n := p.transfer.policy.MergeSourceExchangePeers(peers); n > 0 {
 		debugPeerf("peer %s <- AnswerSources2 merged=%d", p.endpoint.String(), n)

@@ -20,6 +20,9 @@ type Peer struct {
 	ServerClientID int32
 	// DialAddr 可选；非 nil 时优先用于 TCP 拨号（如 KADV6 纯 IPv6 来源），与 Endpoint 可并存（IPv4 时常同步）。
 	DialAddr *net.TCPAddr
+	// UserHash / CryptOptions 来自 Source Exchange v4，用于协议混淆拨号。
+	UserHash     protocol.Hash
+	CryptOptions uint8
 }
 
 func NewPeer(ep protocol.Endpoint) Peer {
