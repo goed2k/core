@@ -1,5 +1,7 @@
 # goed2k
 
+[![CI](https://github.com/goed2k/core/actions/workflows/ci.yml/badge.svg)](https://github.com/goed2k/core/actions/workflows/ci.yml)
+
 `goed2k` 是一个用 Go 编写的 ED2K/eMule 客户端库，附带一个可交互的终端下载管理器。
 
 ![Demo](.docs/demo.gif)
@@ -46,6 +48,18 @@
 - [客户端来源交换（Source Exchange）实现说明（中文）](docs/source-exchange-CN.md)
 - [Secure Ident 计划](docs/secure-ident-plan.md)
 - [版本变更记录（CHANGELOG）](CHANGELOG.md)
+
+## 开发与测试
+
+```bash
+# 默认单元测试（跳过外网联调与外部 fixture）
+go test -race -count=1 ./...
+
+# 运行外网联调测试（需可访问 ED2K 网络）
+GOED2K_RUN_LIVE_TESTS=1 go test -run LiveDownload -count=1 .
+```
+
+推送至 `main` 或提交 Pull Request 时，GitHub Actions 会自动运行 `go vet`、全量单元测试与构建检查。
 
 ## 安装
 

@@ -34,6 +34,7 @@ var liveSmallFallbackPeers = []string{
 }
 
 func TestLiveDownloadReceivesPayload(t *testing.T) {
+	skipUnlessLiveNetwork(t)
 	link, err := ParseEMuleLink(liveTestLink)
 	if err != nil {
 		t.Fatalf("parse link: %v", err)
@@ -125,6 +126,7 @@ func TestLiveDownloadReceivesPayload(t *testing.T) {
 }
 
 func TestLiveDownloadCompletesAndMatchesMD5(t *testing.T) {
+	skipUnlessLiveNetwork(t)
 	link, err := ParseEMuleLink(liveSmallLink)
 	if err != nil {
 		t.Fatalf("parse link: %v", err)
