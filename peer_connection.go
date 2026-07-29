@@ -205,8 +205,11 @@ func NewIncomingPeerConnection(session *Session, conn net.Conn, forceObfuscated 
 		uploadDone:     make([]RequestedUploadBlock, 0),
 		pendingAICHPiece: -1,
 	}
-	wrapped := WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), forceObfuscated, session.settings.CryptLayerRequired)
-	pc.socket = wrapped
+	if forceObfuscated || session.settings.EnableCryptLayer || session.settings.CryptLayerRequired {
+		pc.socket = WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), forceObfuscated, session.settings.CryptLayerRequired)
+	} else {
+		pc.socket = conn
+	}
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		pc.endpoint = protocol.EndpointFromInet(tcpAddr)
 	}
