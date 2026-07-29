@@ -18,10 +18,12 @@ const (
 )
 
 type EMuleLink struct {
-	Hash        protocol.Hash
-	NumberValue int64
-	StringValue string
-	Type        LinkType
+	Hash         protocol.Hash
+	AICHRootHash protocol.AICHHash
+	PartHashes   []protocol.Hash
+	NumberValue  int64
+	StringValue  string
+	Type         LinkType
 }
 
 func ParseEMuleLink(uri string) (EMuleLink, error) {
@@ -75,12 +77,40 @@ func ParseEMuleLink(uri string) (EMuleLink, error) {
 		if err != nil {
 			return EMuleLink{}, NewError(UnsupportedEncoding)
 		}
-		return EMuleLink{
+		link := EMuleLink{
 			Hash:        hash,
 			NumberValue: size,
 			StringValue: name,
 			Type:        LinkFile,
-		}, nil
+		}
+		for i := 5; i < len(parts)-1; i++ {
+			segment := parts[i]
+			if segment == "" {
+				continue
+			}
+			if strings.HasPrefix(segment, "h=") {
+				root, err := protocol.AICHHashFromString(strings.TrimPrefix(segment, "h="))
+				if err != nil {
+					return EMuleLink{}, NewError(LinkMailformed)
+				}
+				link.AICHRootHash = root
+				continue
+			}
+			if strings.HasPrefix(segment, "p=") {
+				raw := strings.TrimPrefix(segment, "p=")
+				for _, pieceHex := range strings.Split(raw, ":") {
+					if pieceHex == "" {
+						continue
+					}
+					pieceHash, err := protocol.HashFromString(pieceHex)
+					if err != nil {
+						return EMuleLink{}, NewError(LinkMailformed)
+					}
+					link.PartHashes = append(link.PartHashes, pieceHash)
+				}
+			}
+		}
+		return link, nil
 	}
 
 	return EMuleLink{}, NewError(UnknownLinkType)

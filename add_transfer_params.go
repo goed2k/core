@@ -8,13 +8,15 @@ import (
 )
 
 type AddTransferParams struct {
-	Hash       protocol.Hash
-	CreateTime int64
-	Size       int64
-	FilePath   string
-	Paused     bool
-	ResumeData *protocol.TransferResumeData
-	Handler    disk.FileHandler
+	Hash         protocol.Hash
+	AICHRootHash protocol.AICHHash
+	CreateTime   int64
+	Size         int64
+	FilePath     string
+	Paused       bool
+	ResumeData   *protocol.TransferResumeData
+	Handler      disk.FileHandler
+	PieceHashes  []protocol.Hash
 }
 
 func NewAddTransferParamsFromFile(h protocol.Hash, createTime int64, size int64, file *os.File, paused bool) AddTransferParams {

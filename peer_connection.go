@@ -162,6 +162,7 @@ type PeerConnection struct {
 	friendSlot         bool
 	uploadResource     UploadableResource
 	sourceExchangeSent bool
+	pendingAICHPiece   int
 }
 
 func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Transfer, peerInfo *Peer) *PeerConnection {
@@ -176,6 +177,7 @@ func NewPeerConnection(session *Session, point protocol.Endpoint, transfer *Tran
 		downloadQueue:  make([]PendingBlock, 0),
 		uploadBlocks:   make([]RequestedUploadBlock, 0),
 		uploadDone:     make([]RequestedUploadBlock, 0),
+		pendingAICHPiece: -1,
 	}
 }
 
@@ -188,6 +190,7 @@ func NewIncomingPeerConnection(session *Session, conn net.Conn, forceObfuscated 
 		downloadQueue:  make([]PendingBlock, 0),
 		uploadBlocks:   make([]RequestedUploadBlock, 0),
 		uploadDone:     make([]RequestedUploadBlock, 0),
+		pendingAICHPiece: -1,
 	}
 	wrapped := WrapIncomingObfuscatedConn(conn, session.GetUserAgent(), forceObfuscated, session.settings.CryptLayerRequired)
 	pc.socket = wrapped
@@ -375,6 +378,7 @@ func (p *PeerConnection) IsUploadLowID() bool {
 func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 	const clientSoftwareAMule = 3
 	mo := MiscOptions{
+		AICHVersion:        1,
 		UnicodeSupport:     1,
 		DataCompVer:        p.session.GetCompressionVersion(),
 		SourceExchange1Ver: 1,
@@ -501,6 +505,61 @@ func (p *PeerConnection) SendHashSetAnswer(res UploadableResource) {
 	if raw, err := p.combiner.Pack("client.HashSetAnswer", &packet); err == nil {
 		p.QueuePacket(raw)
 	}
+}
+
+func (p *PeerConnection) SendAICHRequest(hash protocol.Hash, requested []protocol.AICHHash) {
+	if len(requested) == 0 {
+		return
+	}
+	debugPeerf("peer %s -> AICHRequest hashes=%d", p.endpoint.String(), len(requested))
+	packet := clientproto.AICHRequest{Hash: hash, Hashes: requested}
+	if raw, err := p.combiner.Pack("client.AICHRequest", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendAICHAnswer(res UploadableResource, requested []protocol.AICHHash) {
+	if res == nil || len(requested) == 0 {
+		return
+	}
+	answered := res.UploadAICHHashes(requested)
+	if len(answered) == 0 {
+		return
+	}
+	packet := clientproto.AICHAnswer{Hash: res.GetHash(), Hashes: answered}
+	if raw, err := p.combiner.Pack("client.AICHAnswer", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendAICHFileHashAnswer(res UploadableResource) {
+	if res == nil {
+		return
+	}
+	root, ok := res.AICHRootHash()
+	if !ok {
+		return
+	}
+	packet := clientproto.AICHFileHashAnswer{Hash: res.GetHash(), RootHash: root}
+	if raw, err := p.combiner.Pack("client.AICHFileHashAnswer", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+func (p *PeerConnection) SendAICHRequestForPiece(t *Transfer, pieceIndex int) {
+	if p == nil || t == nil || pieceIndex < 0 {
+		return
+	}
+	if _, ok := t.AICHRootHash(); !ok {
+		return
+	}
+	p.pendingAICHPiece = pieceIndex
+	blockCount := AICHBlockCount(t.pieceSize(pieceIndex))
+	requested := make([]protocol.AICHHash, blockCount)
+	for i := range requested {
+		requested[i] = AICHRequestMarker(pieceIndex, i)
+	}
+	p.SendAICHRequest(t.GetHash(), requested)
 }
 
 func (p *PeerConnection) SendStartUpload(hash protocol.Hash) {
@@ -793,6 +852,28 @@ func (p *PeerConnection) HandleClientHashSetRequest(value *clientproto.HashSetRe
 	p.SendHashSetAnswer(res)
 }
 
+func (p *PeerConnection) HandleClientAICHRequest(value *clientproto.AICHRequest) {
+	if value == nil {
+		return
+	}
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
+		return
+	}
+	p.SendAICHAnswer(res, value.Hashes)
+}
+
+func (p *PeerConnection) HandleClientAICHFileHashRequest(value *clientproto.AICHFileHashRequest) {
+	if value == nil {
+		return
+	}
+	res := p.attachUploadByHash(value.Hash)
+	if res == nil {
+		return
+	}
+	p.SendAICHFileHashAnswer(res)
+}
+
 func (p *PeerConnection) HandleClientStartUpload(value *clientproto.StartUpload) {
 	if value == nil {
 		return
@@ -876,6 +957,31 @@ func (p *PeerConnection) HandleClientRequestParts64(value *clientproto.RequestPa
 	return nil
 }
 
+func (p *PeerConnection) HandleAICHAnswer(value *clientproto.AICHAnswer) {
+	if value == nil || p.transfer == nil || !value.Hash.Equal(p.transfer.GetHash()) {
+		return
+	}
+	if len(value.Hashes) == 0 {
+		return
+	}
+	pieceIndex := p.pendingAICHPiece
+	p.pendingAICHPiece = -1
+	if pieceIndex < 0 {
+		return
+	}
+	p.transfer.StoreAICHPieceBlocks(pieceIndex, value.Hashes)
+	p.transfer.tryAICHRecoverPiece(pieceIndex)
+}
+
+func (p *PeerConnection) HandleAICHFileHashAnswer(value *clientproto.AICHFileHashAnswer) {
+	if value == nil || p.transfer == nil || !value.Hash.Equal(p.transfer.GetHash()) {
+		return
+	}
+	if _, ok := p.transfer.AICHRootHash(); !ok {
+		p.transfer.SetAICHRootHash(value.RootHash)
+	}
+}
+
 func (p *PeerConnection) HandleFileAnswer(value *clientproto.FileAnswer) {
 	debugPeerf("peer %s <- FileAnswer", p.endpoint.String())
 	if p.transfer != nil && value.Hash.Equal(p.transfer.GetHash()) {
@@ -935,6 +1041,10 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.HandleFileStatusAnswer(value)
 		case *clientproto.HashSetRequest:
 			p.HandleClientHashSetRequest(value)
+		case *clientproto.AICHRequest:
+			p.HandleClientAICHRequest(value)
+		case *clientproto.AICHFileHashRequest:
+			p.HandleClientAICHFileHashRequest(value)
 		case *clientproto.HashSetAnswer:
 			debugPeerf("peer %s <- HashSetAnswer parts=%d", p.endpoint.String(), len(value.Parts))
 			if p.transfer != nil {
@@ -990,6 +1100,10 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.HandleRequestSources2(value)
 		case *clientproto.AnswerSources2:
 			p.HandleAnswerSources2(value)
+		case *clientproto.AICHAnswer:
+			p.HandleAICHAnswer(value)
+		case *clientproto.AICHFileHashAnswer:
+			p.HandleAICHFileHashAnswer(value)
 		}
 	}
 	return nil

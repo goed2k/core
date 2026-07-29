@@ -10,6 +10,8 @@ type UploadableResource interface {
 	UploadPriority() UploadPriority
 	AvailablePieces() protocol.BitField
 	UploadHashSet() []protocol.Hash
+	AICHRootHash() (protocol.AICHHash, bool)
+	UploadAICHHashes(requested []protocol.AICHHash) []protocol.AICHHash
 	CanUpload() bool
 	CanUploadRange(begin, end int64) bool
 	ReadRange(begin, end int64) ([]byte, error)

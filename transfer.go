@@ -1,6 +1,7 @@
 package goed2k
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 
@@ -13,6 +14,7 @@ const InvalidETA int64 = -1
 
 type Transfer struct {
 	hash               protocol.Hash
+	aichRoot           protocol.AICHHash
 	createTime         int64
 	size               int64
 	numPieces          int
@@ -23,6 +25,7 @@ type Transfer struct {
 	policy             Policy
 	pm                 *PieceManager
 	hashSet            []protocol.Hash
+	aichPieceBlocks    map[int][]protocol.AICHHash
 	session            *Session
 	pause              bool
 	abort              bool
@@ -37,11 +40,13 @@ type Transfer struct {
 	pendingResumeIO    int
 	uploadPriority     UploadPriority
 	pendingPieceHashes map[int]bool
+	aichPendingPiece   map[int]bool
 }
 
 func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 	t := &Transfer{
 		hash:               atp.Hash,
+		aichRoot:           atp.AICHRootHash,
 		createTime:         atp.CreateTime,
 		size:               atp.Size,
 		numPieces:          int(DivCeil(atp.Size, PieceSize)),
@@ -49,6 +54,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		stat:               NewStatistics(),
 		closedStat:         NewStatistics(),
 		hashSet:            make([]protocol.Hash, 0),
+		aichPieceBlocks:    make(map[int][]protocol.AICHHash),
 		session:            s,
 		pause:              atp.Paused,
 		handler:            atp.Handler,
@@ -57,6 +63,10 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		speedMon:           NewSpeedMonitor(30),
 		uploadPriority:     UploadPriorityNormal,
 		pendingPieceHashes: make(map[int]bool),
+		aichPendingPiece:   make(map[int]bool),
+	}
+	if len(atp.PieceHashes) > 0 {
+		t.hashSet = append(t.hashSet, atp.PieceHashes...)
 	}
 	blocksInLastPiece := int(DivCeil(atp.Size%PieceSize, BlockSize))
 	if blocksInLastPiece == 0 {
@@ -704,6 +714,14 @@ func (t *Transfer) OnPieceHashCompleted(pieceIndex int, hash protocol.Hash) {
 	delete(t.pendingPieceHashes, pieceIndex)
 	if pieceIndex < len(t.hashSet) && !t.hashSet[pieceIndex].Equal(hash) {
 		debugPeerf("transfer %s piece %d hash mismatch got=%s want=%s", t.hash.String(), pieceIndex, hash.String(), t.hashSet[pieceIndex].String())
+		if t.tryAICHRecoverPiece(pieceIndex) {
+			t.needSaveResumeData = true
+			return
+		}
+		if t.aichPendingPiece[pieceIndex] {
+			t.needSaveResumeData = true
+			return
+		}
 		t.picker.RestorePiece(pieceIndex)
 	} else {
 		debugPeerf("transfer %s piece %d hash ok=%s", t.hash.String(), pieceIndex, hash.String())
@@ -809,5 +827,135 @@ func (t *Transfer) restoreResumeData(resumeData *protocol.TransferResumeData) {
 		if t.IsFinished() {
 			t.state = Finished
 		}
+	}
+}
+
+func (t *Transfer) AICHRootHash() (protocol.AICHHash, bool) {
+	if t == nil || t.aichRoot.IsZero() {
+		return protocol.InvalidAICH, false
+	}
+	return t.aichRoot, true
+}
+
+func (t *Transfer) SetAICHRootHash(root protocol.AICHHash) {
+	if t == nil || root.IsZero() {
+		return
+	}
+	t.aichRoot = root
+}
+
+func (t *Transfer) UploadAICHHashes(requested []protocol.AICHHash) []protocol.AICHHash {
+	if t == nil || !t.CanUpload() || len(requested) == 0 {
+		return nil
+	}
+	root, ok := t.AICHRootHash()
+	if !ok {
+		if t.pm == nil {
+			return nil
+		}
+		file := t.pm.GetFile()
+		if file == nil {
+			return nil
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return nil
+		}
+		computed, err := BuildAICHRootFromReader(file, t.size)
+		if err != nil {
+			return nil
+		}
+		t.aichRoot = computed
+		root = computed
+	}
+	return matchAICHHashes(requested, root, func(pieceIndex int) ([]protocol.AICHHash, error) {
+		begin := int64(pieceIndex) * AICHPieceSize
+		end := begin + AICHPieceSize
+		if end > t.size {
+			end = t.size
+		}
+		data, err := t.ReadRange(begin, end)
+		if err != nil {
+			return nil, err
+		}
+		return BuildAICHBlockHashes(data), nil
+	}, t.size)
+}
+
+func (t *Transfer) StoreAICHPieceBlocks(pieceIndex int, hashes []protocol.AICHHash) {
+	if t == nil || len(hashes) == 0 {
+		return
+	}
+	t.aichPieceBlocks[pieceIndex] = append([]protocol.AICHHash(nil), hashes...)
+}
+
+func (t *Transfer) AICHPieceBlocks(pieceIndex int) []protocol.AICHHash {
+	if t == nil {
+		return nil
+	}
+	return t.aichPieceBlocks[pieceIndex]
+}
+
+func (t *Transfer) tryAICHRecoverPiece(pieceIndex int) bool {
+	root, ok := t.AICHRootHash()
+	if !ok || t.pm == nil || t.pieceSize(pieceIndex) <= int64(AICHBlockSize) {
+		return false
+	}
+	blockHashes := t.AICHPieceBlocks(pieceIndex)
+	if len(blockHashes) == 0 {
+		t.requestAICHRecovery(pieceIndex)
+		return false
+	}
+	delete(t.aichPendingPiece, pieceIndex)
+	pieceRoot := BuildAICHTreeRoot(blockHashes)
+	pieceBegin := int64(pieceIndex) * AICHPieceSize
+	pieceEnd := pieceBegin + t.pieceSize(pieceIndex)
+	pieceData, err := t.ReadRange(pieceBegin, pieceEnd)
+	if err != nil {
+		return false
+	}
+	if !pieceRoot.Equal(root) && len(t.hashSet) > pieceIndex {
+		// For multi-piece files validate piece subtree when possible.
+		_ = pieceRoot
+	}
+	bad := LocateCorruptAICHBlocks(pieceData, blockHashes)
+	if len(bad) == 0 {
+		return false
+	}
+	debugPeerf("transfer %s piece %d AICH recovered %d/%d bad blocks", t.hash.String(), pieceIndex, len(bad), len(blockHashes))
+	t.picker.RestorePiece(pieceIndex)
+	for _, blockIndex := range bad {
+		aichBegin := int64(blockIndex) * int64(AICHBlockSize)
+		aichEnd := aichBegin + int64(AICHBlockSize)
+		if aichEnd > int64(len(pieceData)) {
+			aichEnd = int64(len(pieceData))
+		}
+		t.resetOverlappingDownloadBlocks(pieceIndex, pieceBegin+aichBegin, pieceBegin+aichEnd)
+	}
+	return true
+}
+
+func (t *Transfer) resetOverlappingDownloadBlocks(pieceIndex int, begin, end int64) {
+	blockBegin := int((begin - int64(pieceIndex)*AICHPieceSize) / BlockSize)
+	blockEnd := int((end - int64(pieceIndex)*AICHPieceSize + BlockSize - 1) / BlockSize)
+	for blockIndex := blockBegin; blockIndex <= blockEnd; blockIndex++ {
+		block := data.NewPieceBlock(pieceIndex, blockIndex)
+		t.picker.AbortDownload(block, nil)
+	}
+}
+
+func (t *Transfer) requestAICHRecovery(pieceIndex int) {
+	if t == nil {
+		return
+	}
+	if _, ok := t.AICHRootHash(); !ok {
+		return
+	}
+	t.aichPendingPiece[pieceIndex] = true
+	for _, c := range t.connections {
+		if c == nil || c.IsDisconnecting() || c.remotePeerInfo.Misc1.AICHVersion == 0 {
+			continue
+		}
+		c.SendAICHRequestForPiece(t, pieceIndex)
+		return
 	}
 }

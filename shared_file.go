@@ -21,13 +21,14 @@ const (
 // FileSize 为字节大小（与 Transfer.Size() 对应，避免与 Size() 方法同名冲突）。
 type SharedFile struct {
 	Hash        protocol.Hash
+	aichRoot    protocol.AICHHash
 	FileSize    int64
-	Path        string
-	Name        string
-	PieceHashes []protocol.Hash
-	Origin      SharedOrigin
-	Completed   bool
-	LastHashAt  int64
+	Path         string
+	Name         string
+	PieceHashes  []protocol.Hash
+	Origin       SharedOrigin
+	Completed    bool
+	LastHashAt   int64
 }
 
 // FileLabel 用于协议中的展示名（通常为文件名）。
@@ -89,6 +90,46 @@ func (s *SharedFile) UploadHashSet() []protocol.Hash {
 		return []protocol.Hash{s.Hash}
 	}
 	return nil
+}
+
+func (s *SharedFile) AICHRootHash() (protocol.AICHHash, bool) {
+	if s == nil || s.aichRoot.IsZero() {
+		return protocol.InvalidAICH, false
+	}
+	return s.aichRoot, true
+}
+
+func (s *SharedFile) SetAICHRootHash(root protocol.AICHHash) {
+	if s == nil || root.IsZero() {
+		return
+	}
+	s.aichRoot = root
+}
+
+func (s *SharedFile) UploadAICHHashes(requested []protocol.AICHHash) []protocol.AICHHash {
+	if s == nil || !s.CanUpload() || len(requested) == 0 {
+		return nil
+	}
+	root, ok := s.AICHRootHash()
+	if !ok {
+		root, err := BuildAICHRootFromFile(s.Path)
+		if err != nil {
+			return nil
+		}
+		s.aichRoot = root
+	}
+	return matchAICHHashes(requested, root, func(pieceIndex int) ([]protocol.AICHHash, error) {
+		begin := int64(pieceIndex) * AICHPieceSize
+		end := begin + AICHPieceSize
+		if end > s.FileSize {
+			end = s.FileSize
+		}
+		data, err := s.ReadRange(begin, end)
+		if err != nil {
+			return nil, err
+		}
+		return BuildAICHBlockHashes(data), nil
+	}, s.FileSize)
 }
 
 // CanUpload 是否可向其他 peer 上传数据。

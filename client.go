@@ -545,7 +545,12 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 	}
 	targetPath := filepath.Join(outputDir, link.StringValue)
 	handler := disk.NewDesktopFileHandler(targetPath)
-	handle, err := c.session.AddTransferWithHandler(link.Hash, link.NumberValue, handler)
+	atp := NewAddTransferParamsFromHandler(link.Hash, CurrentTimeMillis(), link.NumberValue, handler, false)
+	atp.AICHRootHash = link.AICHRootHash
+	if len(link.PartHashes) > 0 {
+		atp.PieceHashes = append(atp.PieceHashes, link.PartHashes...)
+	}
+	handle, err := c.session.AddTransferParams(atp)
 	if err == nil {
 		logx.Debug("transfer added", "file", link.StringValue, "hash", link.Hash.String(), "size", link.NumberValue, "path", targetPath)
 		if handle.transfer != nil {

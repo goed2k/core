@@ -27,6 +27,10 @@ const (
 	opCompressedPart64  byte = 0xA1
 	opRequestSources2   byte = 0x83
 	opAnswerSources2    byte = 0x84
+	opAICHRequest       byte = 0x9B
+	opAICHAnswer        byte = 0x9C
+	opAICHFileHashAns   byte = 0x9D
+	opAICHFileHashReq   byte = 0x9E
 )
 
 func NewPacketCombiner() protocol.PacketCombiner {
@@ -69,5 +73,9 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc.Register(protocol.PK(protocol.EMuleProt, opCompressedPart64), "client.CompressedPart64", func() protocol.Serializable { return &CompressedPart64{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opRequestSources2), "client.RequestSources2", func() protocol.Serializable { return &RequestSources2{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opAnswerSources2), "client.AnswerSources2", func() protocol.Serializable { return &AnswerSources2{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHRequest), "client.AICHRequest", func() protocol.Serializable { return &AICHRequest{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHAnswer), "client.AICHAnswer", func() protocol.Serializable { return &AICHAnswer{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHFileHashReq), "client.AICHFileHashRequest", func() protocol.Serializable { return &AICHFileHashRequest{} })
+	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHFileHashAns), "client.AICHFileHashAnswer", func() protocol.Serializable { return &AICHFileHashAnswer{} })
 	return pc
 }
