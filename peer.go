@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/goed2k/core/protocol"
+	clientproto "github.com/goed2k/core/protocol/client"
 )
 
 type Peer struct {
@@ -98,8 +99,13 @@ func (p Peer) HasDialableAddress() bool {
 	return true
 }
 
-// CanEncodeAnswerSources2 当前 AnswerSources2 v4 条目仅支持 IPv4 hybrid uint32；纯 IPv6 无法编码。
-func (p Peer) CanEncodeAnswerSources2() bool {
+// CanEncodeAnswerSources2 判断是否可编码进 AnswerSources2（IPv4 或 v5 IPv6）。
+func (p Peer) CanEncodeAnswerSources2(sx2Version byte) bool {
+	if sx2Version >= clientproto.SourceExchangeIPv6Version {
+		if p.DialAddr != nil && p.DialAddr.IP != nil && p.DialAddr.IP.To4() == nil {
+			return p.DialAddr.Port > 0 && !p.DialAddr.IP.IsUnspecified()
+		}
+	}
 	if p.DialAddr != nil {
 		return p.DialAddr.IP.To4() != nil
 	}
@@ -108,9 +114,6 @@ func (p Peer) CanEncodeAnswerSources2() bool {
 
 // EffectiveEndpointForSX 返回用于 SX 条目中 UserID 的 IPv4 Endpoint（含 IPv4-mapped IPv6 映射为 IPv4）。
 func (p Peer) EffectiveEndpointForSX() (protocol.Endpoint, bool) {
-	if !p.CanEncodeAnswerSources2() {
-		return protocol.Endpoint{}, false
-	}
 	if p.DialAddr != nil {
 		if ip4 := p.DialAddr.IP.To4(); ip4 != nil {
 			return protocol.EndpointFromInet(&net.TCPAddr{IP: ip4, Port: p.DialAddr.Port}), true
@@ -120,6 +123,36 @@ func (p Peer) EffectiveEndpointForSX() (protocol.Endpoint, bool) {
 		return p.Endpoint, true
 	}
 	return protocol.Endpoint{}, false
+}
+
+// ToSourceExchangeEntry 将 Peer 编码为 AnswerSources2 条目。
+func (p Peer) ToSourceExchangeEntry(sx1Ver int, sx2Version byte, cryptOptions uint8) (clientproto.SourceExchangeEntry, bool) {
+	if !p.CanEncodeAnswerSources2(sx2Version) {
+		return clientproto.SourceExchangeEntry{}, false
+	}
+	var entry clientproto.SourceExchangeEntry
+	entry.CryptOptions = cryptOptions
+	entry.UserHash = p.UserHash
+	if ep, ok := p.EffectiveEndpointForSX(); ok {
+		uid := uint32(ep.IP())
+		if sx1Ver <= 2 {
+			uid = clientproto.SwapUint32(uid)
+		}
+		entry.UserID = uid
+		entry.TCPPort = uint16(ep.Port())
+	}
+	if sx2Version >= clientproto.SourceExchangeIPv6Version && p.DialAddr != nil {
+		if ip := p.DialAddr.IP.To16(); ip != nil && ip.To4() == nil {
+			copy(entry.IPv6[:], ip)
+			if entry.TCPPort == 0 {
+				entry.TCPPort = uint16(p.DialAddr.Port)
+			}
+		}
+	}
+	if entry.UserID == 0 && !entry.EntryHasIPv6() {
+		return clientproto.SourceExchangeEntry{}, false
+	}
+	return entry, true
 }
 
 // isFilteredPeerTCPAddr 过滤回环、私网、RFC4193 等（与 IsLocalAddress 对 IPv4 的语义对齐扩展至 IPv6）。

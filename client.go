@@ -849,7 +849,17 @@ func (c *Client) ExportPartMetForTransfer(hash protocol.Hash) error {
 	if path == "" {
 		return errors.New("transfer has no file path")
 	}
-	return ExportPartMet(path, handle.GetResumeData())
+	return ExportPartMet(path, PartMetInfo{
+		Hash:     handle.GetHash(),
+		FileSize: handle.transfer.Size(),
+		Filename: filepath.Base(path),
+		Resume:   handle.GetResumeData(),
+	})
+}
+
+// ImportPartMet 从 <path>.part.met 导入续传数据（自动识别 eMule 二进制或 goed2k JSON）。
+func (c *Client) ImportPartMet(path string) (PartMetInfo, error) {
+	return ImportPartMet(path)
 }
 
 func (c *Client) SuspendUpload(hash protocol.Hash, terminate bool) uint16 {

@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **eMule 二进制 `.part.met`**：`ExportPartMet` 默认写出 eMule/aMule 兼容格式；`ImportPartMet` / `ParsePartMetBytes` 自动识别二进制与 goed2k JSON；保留 `.part.met.json` 旁注
+- **Source Exchange v5（IPv6 扩展）**：`AnswerSources2` 版本 5 在 v4 条目后追加 16 字节 IPv6；Hello 标签 `0x3B` 协商能力
+- **eMule `ipfilter.dat` 格式**：`LoadIPFilter` / `ParseIPFilterBytes` 支持 PeerGuardian 与 AntiP2P 文本格式及 AccessLevel 过滤级别
+- **互操作回归**：SecIdent 双端上传、CryptLayer 强制模式、IPv6 SX 条目合并测试
+
+### 变更
+
+- `ExportPartMet` 签名改为接收 `PartMetInfo`（含 hash、size、resume）
+- `IPFilter` 支持按 AccessLevel 与 FilterLevel（默认 127）判定；简单 CIDR 列表仍为无条件拒绝
+
 ## [0.1.2] - 2026-07-29
 
 ### 新增

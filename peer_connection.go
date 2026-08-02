@@ -113,8 +113,9 @@ type RemotePeerInfo struct {
 	ModVersion      string
 	ModNumber       int
 	Misc1           MiscOptions
-	Misc2           MiscOptions2
-	SecIdentVersion int
+	Misc2               MiscOptions2
+	SourceExchange2Ver  byte
+	SecIdentVersion     int
 	SecIdentKeyFP   uint32
 }
 
@@ -423,6 +424,7 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 			protocol.NewUInt32Tag(0xFB, uint32((clientSoftwareAMule<<24)|((p.session.GetModMajorVersion()&0x7f)<<17)|((p.session.GetModMinorVersion()&0x7f)<<10)|((p.session.GetModBuildVersion()&0x7f)<<7))),
 			protocol.NewUInt32Tag(0xFA, uint32(mo.IntValue())),
 			protocol.NewUInt32Tag(0xFE, uint32(mo2.Value)),
+			protocol.NewUInt32Tag(helloTagSourceExchange2Ver, uint32(clientproto.SourceExchangeIPv6Version)),
 		},
 		ServerPoint: protocol.Endpoint{},
 	}
@@ -1601,8 +1603,9 @@ const (
 	helloTagVersion  = 0x11
 	helloTagModName  = 0x55
 	helloTagModVer   = 0xFB
-	helloTagMisc1    = 0xFA
-	helloTagMisc2    = 0xFE
+	helloTagMisc1               = 0xFA
+	helloTagMisc2               = 0xFE
+	helloTagSourceExchange2Ver  = 0x3B
 )
 
 func helloStringFromTag(t protocol.SimpleTag) string {
@@ -1660,6 +1663,10 @@ func parseHelloTagList(dst *RemotePeerInfo, props *protocol.TagList) {
 		case helloTagMisc2:
 			if t.Type == protocol.TagTypeUint32 {
 				dst.Misc2.Assign(int(t.UInt32))
+			}
+		case helloTagSourceExchange2Ver:
+			if t.Type == protocol.TagTypeUint32 && t.UInt32 > 0 {
+				dst.SourceExchange2Ver = byte(t.UInt32)
 			}
 		}
 	}
@@ -1743,12 +1750,19 @@ func (p *PeerConnection) sendAnswerSources2SelfOnly(hash protocol.Hash) {
 	p.sendAnswerSources2(hash, entries)
 }
 
+func (p *PeerConnection) sourceExchange2VersionForPeer() byte {
+	if p.remotePeerInfo.SourceExchange2Ver >= clientproto.SourceExchangeIPv6Version {
+		return clientproto.SourceExchangeIPv6Version
+	}
+	return clientproto.SourceExchange2Version
+}
+
 func (p *PeerConnection) sendAnswerSources2(hash protocol.Hash, entries []clientproto.SourceExchangeEntry) {
 	if len(entries) == 0 {
 		return
 	}
 	ans := clientproto.AnswerSources2{
-		Version: clientproto.SourceExchange2Version,
+		Version: p.sourceExchange2VersionForPeer(),
 		Hash:    hash,
 		Entries: entries,
 	}
@@ -1778,27 +1792,15 @@ func (p *PeerConnection) maybeSendFileComment() {
 
 func (p *PeerConnection) buildSourceExchangeEntries(peers []Peer) []clientproto.SourceExchangeEntry {
 	sx1 := p.remotePeerInfo.Misc1.SourceExchange1Ver
+	sx2 := p.sourceExchange2VersionForPeer()
+	crypt := cryptOptionsForLocal(p.session.settings)
 	out := make([]clientproto.SourceExchangeEntry, 0, len(peers))
 	for _, pe := range peers {
-		if !pe.CanEncodeAnswerSources2() {
-			continue
-		}
-		ep, ok := pe.EffectiveEndpointForSX()
+		entry, ok := pe.ToSourceExchangeEntry(sx1, sx2, crypt)
 		if !ok {
 			continue
 		}
-		uid := uint32(ep.IP())
-		if sx1 <= 2 {
-			uid = clientproto.SwapUint32(uid)
-		}
-		out = append(out, clientproto.SourceExchangeEntry{
-			UserID:       uid,
-			TCPPort:      uint16(ep.Port()),
-			ServerIP:     0,
-			ServerPort:   0,
-			UserHash:     protocol.Invalid,
-			CryptOptions: cryptOptionsForLocal(p.session.settings),
-		})
+		out = append(out, entry)
 	}
 	return out
 }
@@ -1812,21 +1814,46 @@ func (p *PeerConnection) HandleAnswerSources2(ans *clientproto.AnswerSources2) {
 	}
 	peers := make([]Peer, 0, len(ans.Entries))
 	for _, e := range ans.Entries {
-		ep := endpointFromSourceExchangeEntry(e.UserID, e.TCPPort, ans.Version)
-		if !p.isAcceptableSourceExchangeEndpoint(ep) {
+		peer, ok := peerFromSourceExchangeEntry(e, ans.Version)
+		if !ok {
 			continue
 		}
-		peers = append(peers, Peer{
-			Endpoint:     ep,
-			Connectable:  true,
-			SourceFlag:   int(PeerSourceExchange),
-			UserHash:     e.UserHash,
-			CryptOptions: e.CryptOptions,
-		})
+		if peer.Endpoint.Defined() && !p.isAcceptableSourceExchangeEndpoint(peer.Endpoint) {
+			continue
+		}
+		if peer.DialAddr != nil && isFilteredPeerTCPAddr(peer.DialAddr) {
+			continue
+		}
+		peers = append(peers, peer)
 	}
 	if n := p.transfer.policy.MergeSourceExchangePeers(peers); n > 0 {
 		debugPeerf("peer %s <- AnswerSources2 merged=%d", p.endpoint.String(), n)
 	}
+}
+
+func peerFromSourceExchangeEntry(e clientproto.SourceExchangeEntry, packetVer byte) (Peer, bool) {
+	peer := Peer{
+		Connectable:  true,
+		SourceFlag:   int(PeerSourceExchange),
+		UserHash:     e.UserHash,
+		CryptOptions: e.CryptOptions,
+	}
+	if e.UserID != 0 {
+		ep := endpointFromSourceExchangeEntry(e.UserID, e.TCPPort, packetVer)
+		if !ep.Defined() {
+			return Peer{}, false
+		}
+		peer.Endpoint = ep
+	}
+	if packetVer >= clientproto.SourceExchangeIPv6Version {
+		if ip := e.EntryIPv6Addr(); ip != nil && !ip.IsUnspecified() {
+			peer.DialAddr = &net.TCPAddr{IP: ip, Port: int(e.TCPPort)}
+		}
+	}
+	if !peer.Endpoint.Defined() && peer.DialAddr == nil {
+		return Peer{}, false
+	}
+	return peer, true
 }
 
 func endpointFromSourceExchangeEntry(dwID uint32, port uint16, packetVer byte) protocol.Endpoint {

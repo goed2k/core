@@ -31,8 +31,11 @@ func TestPeerFromKADV6SearchEntry(t *testing.T) {
 	if p.SourceFlag&int(PeerKADV6) == 0 {
 		t.Fatal("expected PeerKADV6 flag")
 	}
-	if p.CanEncodeAnswerSources2() {
-		t.Fatal("pure ipv6 must not encode in AnswerSources2")
+	if p.CanEncodeAnswerSources2(4) {
+		t.Fatal("pure ipv6 must not encode in SX v4")
+	}
+	if !p.CanEncodeAnswerSources2(5) {
+		t.Fatal("pure ipv6 should encode in SX v5")
 	}
 }
 
@@ -42,8 +45,8 @@ func TestNewPeerFromTCPAddrIPv4MappedEncodesSX(t *testing.T) {
 	if !p.Endpoint.Defined() {
 		t.Fatal("expected endpoint from mapped")
 	}
-	if !p.CanEncodeAnswerSources2() {
-		t.Fatal("mapped ipv6 should encode as ipv4 in SX")
+	if !p.CanEncodeAnswerSources2(4) {
+		t.Fatal("mapped ipv6 should encode as ipv4 in SX v4")
 	}
 }
 
