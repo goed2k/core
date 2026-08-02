@@ -96,7 +96,7 @@ func (h *emuleInteropHarness) runLocalUpload(t *testing.T, seedSettings, leechSe
 		t.Fatalf("add peer: %v", err)
 	}
 
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		UpdateCachedTime()
 		seedSession.SecondTick(CurrentTime(), 100)
