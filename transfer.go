@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/disk"
@@ -44,6 +45,8 @@ type Transfer struct {
 	downloadPriority   TransferPriority
 	pendingPieceHashes map[int]bool
 	aichPendingPiece   map[int]bool
+	previewMu          sync.Mutex
+	previewPieces      map[uint16][]byte
 }
 
 func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
@@ -301,6 +304,47 @@ func (t *Transfer) isFinishedForSharePublish() bool {
 		return true
 	}
 	return t.IsFinished()
+}
+
+// isKadPublishable 是否可向 KAD 发布源（含 eMule 部分完成文件策略）。
+func (t *Transfer) isKadPublishable() bool {
+	if t == nil || t.IsPaused() || t.IsAborted() {
+		return false
+	}
+	if t.isFinishedForSharePublish() {
+		return true
+	}
+	if t.session == nil || !t.session.settings.PartialKadPublish {
+		return false
+	}
+	return t.CanUpload()
+}
+
+// StorePreviewPiece 缓存来自对端的预览分片数据。
+func (t *Transfer) StorePreviewPiece(index uint16, data []byte) {
+	if t == nil || len(data) == 0 {
+		return
+	}
+	t.previewMu.Lock()
+	defer t.previewMu.Unlock()
+	if t.previewPieces == nil {
+		t.previewPieces = make(map[uint16][]byte)
+	}
+	t.previewPieces[index] = append([]byte(nil), data...)
+}
+
+// PreviewPiece 返回已缓存的预览分片。
+func (t *Transfer) PreviewPiece(index uint16) ([]byte, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t.previewMu.Lock()
+	defer t.previewMu.Unlock()
+	data, ok := t.previewPieces[index]
+	if !ok || len(data) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), data...), true
 }
 
 func (t *Transfer) ResumeData() *protocol.TransferResumeData {

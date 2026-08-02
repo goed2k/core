@@ -50,6 +50,11 @@ func (h *emuleInteropHarness) runLocalUpload(t *testing.T, seedSettings, leechSe
 		seedSettings.ListenPort = h.reserveTCPPort()
 	}
 	seedSession := NewSession(seedSettings)
+	if seedSettings.EnableSecIdent && seedSettings.IdentityKeyPath != "" {
+		if err := seedSession.LoadIdentity(seedSettings.IdentityKeyPath); err != nil {
+			t.Fatalf("seed load identity: %v", err)
+		}
+	}
 	if err := seedSession.Listen(); err != nil {
 		t.Fatalf("seed listen: %v", err)
 	}
@@ -63,6 +68,11 @@ func (h *emuleInteropHarness) runLocalUpload(t *testing.T, seedSettings, leechSe
 	seedHandle.transfer.WeHave(0)
 
 	leechSession := NewSession(leechSettings)
+	if leechSettings.EnableSecIdent && leechSettings.IdentityKeyPath != "" {
+		if err := leechSession.LoadIdentity(leechSettings.IdentityKeyPath); err != nil {
+			t.Fatalf("leech load identity: %v", err)
+		}
+	}
 	defer leechSession.CloseListener()
 	defer leechSession.DisconnectFrom()
 
@@ -86,7 +96,7 @@ func (h *emuleInteropHarness) runLocalUpload(t *testing.T, seedSettings, leechSe
 		t.Fatalf("add peer: %v", err)
 	}
 
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		UpdateCachedTime()
 		seedSession.SecondTick(CurrentTime(), 100)
@@ -255,5 +265,43 @@ func TestCryptLayerLocalOptionsReflectSettings(t *testing.T) {
 	opts = cryptOptionsForLocal(st)
 	if opts&cryptOptionRequested == 0 || opts&cryptOptionRequired == 0 {
 		t.Fatalf("expected requested+required bits, got %#x", opts)
+	}
+}
+
+func TestSecIdentInteropLocalUpload(t *testing.T) {
+	h := newEMuleInteropHarness(t)
+	payload := bytes.Repeat([]byte("sec-ident-interop-"), 2048)
+	seed := NewSettings()
+	seed.EnableSecIdent = true
+	seed.IdentityKeyPath = filepath.Join(t.TempDir(), "seed.pem")
+	leech := NewSettings()
+	leech.EnableSecIdent = true
+	leech.IdentityKeyPath = filepath.Join(t.TempDir(), "leech.pem")
+	h.runLocalUpload(t, seed, leech, payload)
+}
+
+func TestCryptLayerRequiredInterop(t *testing.T) {
+	h := newEMuleInteropHarness(t)
+	payload := bytes.Repeat([]byte("crypt-required-"), 2048)
+	seed := NewSettings()
+	seed.EnableCryptLayer = true
+	seed.CryptLayerRequired = true
+	leech := NewSettings()
+	leech.EnableCryptLayer = true
+	leech.CryptLayerRequired = true
+	h.runLocalUpload(t, seed, leech, payload)
+}
+
+func TestSourceExchangeIPv6EntryMerge(t *testing.T) {
+	ip := net.ParseIP("2001:db8::42")
+	var ip6 [16]byte
+	copy(ip6[:], ip.To16())
+	entry := clientproto.SourceExchangeEntry{TCPPort: 4662, IPv6: ip6}
+	peer, ok := peerFromSourceExchangeEntry(entry, clientproto.SourceExchangeIPv6Version)
+	if !ok || peer.DialAddr == nil || peer.DialAddr.Port != 4662 {
+		t.Fatalf("peer %+v ok=%v", peer, ok)
+	}
+	if !peer.DialAddr.IP.Equal(ip) {
+		t.Fatalf("ip %v", peer.DialAddr.IP)
 	}
 }

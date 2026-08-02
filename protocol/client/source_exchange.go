@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"net"
 
 	"github.com/goed2k/core/protocol"
 )
@@ -15,6 +17,9 @@ import (
 
 // SourceExchange2Version 为当前实现的 SX2 载荷版本（与 aMule SOURCEEXCHANGE2_VERSION 一致）。
 const SourceExchange2Version byte = 4
+
+// SourceExchangeIPv6Version 为 goed2k 扩展的 IPv6 来源交换版本（v4 条目后追加 16 字节 IPv6）。
+const SourceExchangeIPv6Version byte = 5
 
 // RequestSources2：OP_EMULEPROT OP_REQUESTSOURCES2 载荷。
 // 顺序：uint8 版本（SourceExchange2Version）+ uint16 保留(0) + 16 字节文件 hash。
@@ -55,7 +60,7 @@ func (r RequestSources2) Put(dst *bytes.Buffer) error {
 
 func (r RequestSources2) BytesCount() int { return 0 }
 
-// SourceExchangeEntry 表示 AnswerSources2 中单个来源（SX2 v4：含 UserHash 与 CryptOptions）。
+// SourceExchangeEntry 表示 AnswerSources2 中单个来源（SX2 v4：含 UserHash 与 CryptOptions；v5 追加 IPv6）。
 type SourceExchangeEntry struct {
 	UserID       uint32
 	TCPPort      uint16
@@ -63,6 +68,7 @@ type SourceExchangeEntry struct {
 	ServerPort   uint16
 	UserHash     protocol.Hash
 	CryptOptions uint8
+	IPv6         [16]byte
 }
 
 // AnswerSources2：OP_EMULEPROT OP_ANSWERSOURCES2 载荷。
@@ -81,6 +87,8 @@ func entrySizeForVersion(ver byte) (int, error) {
 		return 4 + 2 + 4 + 2 + 16, nil
 	case 4:
 		return 4 + 2 + 4 + 2 + 16 + 1, nil
+	case SourceExchangeIPv6Version:
+		return 4 + 2 + 4 + 2 + 16 + 1 + 16, nil
 	default:
 		return 0, fmt.Errorf("answer sources2: unsupported sx entry version %d", ver)
 	}
@@ -141,6 +149,13 @@ func (a *AnswerSources2) Get(src *bytes.Reader) error {
 			}
 			e.CryptOptions = c
 		}
+		if a.Version >= SourceExchangeIPv6Version {
+			var ip6 [16]byte
+			if _, err := io.ReadFull(src, ip6[:]); err != nil {
+				return err
+			}
+			e.IPv6 = ip6
+		}
 		a.Entries = append(a.Entries, e)
 	}
 	return nil
@@ -180,8 +195,26 @@ func (a AnswerSources2) Put(dst *bytes.Buffer) error {
 				return err
 			}
 		}
+		if a.Version >= SourceExchangeIPv6Version {
+			if _, err := dst.Write(e.IPv6[:]); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// EntryHasIPv6 判断条目是否携带有效 IPv6 地址。
+func (e SourceExchangeEntry) EntryHasIPv6() bool {
+	return net.IP(e.IPv6[:]).To16() != nil && !net.IP(e.IPv6[:]).IsUnspecified()
+}
+
+// EntryIPv6Addr 返回条目的 IPv6 地址（无则 nil）。
+func (e SourceExchangeEntry) EntryIPv6Addr() net.IP {
+	if !e.EntryHasIPv6() {
+		return nil
+	}
+	return net.IP(e.IPv6[:]).To16()
 }
 
 func (a AnswerSources2) BytesCount() int { return 0 }

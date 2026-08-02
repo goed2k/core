@@ -28,7 +28,6 @@ func localOutboundIPv4() net.IP {
 	return nil
 }
 
-// kadPublishEndpoint 返回用于 KAD 发布源（TCP）的本机可达地址；与 eMule 类似，绑定具体网卡时用监听地址，否则用出站 IPv4。
 func (s *Session) kadPublishEndpoint() protocol.Endpoint {
 	s.mu.Lock()
 	port := s.settings.ListenPort
@@ -124,7 +123,7 @@ func (s *Session) PublishTransferToKAD(t *Transfer) {
 	if tracker == nil {
 		return
 	}
-	if t.IsPaused() || t.IsAborted() || !t.isFinishedForSharePublish() {
+	if t.IsPaused() || t.IsAborted() || !t.isKadPublishable() {
 		return
 	}
 	ep := s.kadPublishEndpoint()
@@ -168,7 +167,7 @@ func (s *Session) publishAllFinishedTransfersKAD(ep protocol.Endpoint) {
 	tracker := s.dhtTracker
 	seen := make(map[string]struct{})
 	for _, t := range s.snapshotTransfers() {
-		if t == nil || t.IsPaused() || t.IsAborted() || !t.isFinishedForSharePublish() {
+		if t == nil || t.IsPaused() || t.IsAborted() || !t.isKadPublishable() {
 			continue
 		}
 		s.publishSingleTransferKAD(tracker, ep, t)

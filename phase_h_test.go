@@ -1,7 +1,6 @@
 package goed2k
 
 import (
-	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -76,6 +75,29 @@ func TestSetTransferPriorityPersistsInClientState(t *testing.T) {
 	}
 	if restoredHandle.transfer.DownloadPriority() != TransferPriorityVeryHigh {
 		t.Fatalf("expected priority %d, got %d", TransferPriorityVeryHigh, restoredHandle.transfer.DownloadPriority())
+	}
+}
+
+func TestParseEmuleIPFilterAccessLevels(t *testing.T) {
+	filter, err := ParseEmuleIPFilter("064.094.089.000 - 064.094.089.255 , 100 , Gator\n013.020.222.112 - 013.020.222.112 , 230 , Allowed\n", 127)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !filter.Contains(netParseIP(t, "64.94.89.1")) {
+		t.Fatal("expected gator range blocked at level 127")
+	}
+	if filter.Contains(netParseIP(t, "13.20.222.112")) {
+		t.Fatal("expected high access level allowed")
+	}
+}
+
+func TestParseEmuleIPFilterAntiP2PFormat(t *testing.T) {
+	filter, err := ParseEmuleIPFilter("Evil ISP : 010.000.000.000 - 010.255.255.255\n", 127)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !filter.Contains(netParseIP(t, "10.0.0.1")) {
+		t.Fatal("expected antip2p range blocked")
 	}
 }
 
@@ -157,11 +179,11 @@ func TestBanPeerPersistsAndRemovesFromPolicy(t *testing.T) {
 	}
 }
 
-func TestExportPartMetWritesJSONSidecar(t *testing.T) {
+func TestExportPartMetWritesEmuleBinary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "movie.avi")
 	resume := &protocol.TransferResumeData{
-		Hashes: []protocol.Hash{protocol.EMule},
+		Hashes: []protocol.Hash{protocol.EMule, protocol.MustHashFromString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")},
 		Pieces: protocol.NewBitField(2),
 		DownloadedBlocks: []data.PieceBlock{
 			data.NewPieceBlock(1, 0),
@@ -172,7 +194,13 @@ func TestExportPartMetWritesJSONSidecar(t *testing.T) {
 	}
 	resume.Pieces.SetBit(0)
 
-	if err := ExportPartMet(path, resume); err != nil {
+	info := PartMetInfo{
+		Hash:     protocol.EMule,
+		FileSize: PieceSize * 2,
+		Filename: "movie.avi",
+		Resume:   resume,
+	}
+	if err := ExportPartMet(path, info); err != nil {
 		t.Fatalf("export part met: %v", err)
 	}
 	target := path + ".part.met"
@@ -180,21 +208,15 @@ func TestExportPartMetWritesJSONSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read part met: %v", err)
 	}
-	var doc PartMetDocument
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if !protocol.IsEmulePartMetBytes(raw) {
+		t.Fatalf("expected emule binary, got header %#x", raw[0])
 	}
-	if doc.Format != partMetFormat || doc.Version != partMetVersion {
-		t.Fatalf("unexpected header: %+v", doc)
+	got, err := ImportPartMet(path)
+	if err != nil {
+		t.Fatalf("import: %v", err)
 	}
-	if len(doc.PieceHashes) != 1 || len(doc.CompletedPieces) != 2 || !doc.CompletedPieces[0] {
-		t.Fatalf("unexpected piece data: %+v", doc)
-	}
-	if len(doc.DownloadedBlocks) != 1 || doc.DownloadedBlocks[0].Piece != 1 {
-		t.Fatalf("unexpected blocks: %+v", doc.DownloadedBlocks)
-	}
-	if len(doc.KnownPeers) != 1 || doc.KnownPeers[0] != "203.0.113.10:4662" {
-		t.Fatalf("unexpected peers: %+v", doc.KnownPeers)
+	if len(got.Resume.Hashes) != 2 || got.Resume.Pieces.Len() != 2 || !got.Resume.Pieces.GetBit(0) {
+		t.Fatalf("unexpected resume %+v", got.Resume)
 	}
 }
 

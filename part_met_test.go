@@ -1,0 +1,98 @@
+package goed2k
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/goed2k/core/data"
+	"github.com/goed2k/core/protocol"
+)
+
+func TestExportImportEmulePartMetRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.avi")
+	hash := protocol.EMule
+	resume := &protocol.TransferResumeData{
+		Hashes: []protocol.Hash{hash, hash},
+		Pieces: protocol.NewBitField(2),
+		DownloadedBlocks: []data.PieceBlock{
+			data.NewPieceBlock(1, 0),
+		},
+	}
+	resume.Pieces.SetBit(0)
+
+	info := PartMetInfo{
+		Hash:     hash,
+		FileSize: PieceSize * 2,
+		Filename: "movie.avi",
+		Resume:   resume,
+	}
+	if err := ExportPartMet(path, info); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	raw, err := os.ReadFile(path + ".part.met")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !protocol.IsEmulePartMetBytes(raw) {
+		t.Fatal("expected emule binary part.met")
+	}
+	got, err := ImportPartMet(path)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !got.Hash.Equal(hash) || got.FileSize != PieceSize*2 {
+		t.Fatalf("unexpected info %+v", got)
+	}
+	if got.Resume == nil || got.Resume.Pieces.Len() != 2 || !got.Resume.Pieces.GetBit(0) {
+		t.Fatalf("resume pieces %+v", got.Resume.Pieces.Bits())
+	}
+}
+
+func TestImportGoed2kJSONPartMet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.bin")
+	info := PartMetInfo{
+		Hash:     protocol.EMule,
+		FileSize: PieceSize,
+		Resume: &protocol.TransferResumeData{
+			Hashes: []protocol.Hash{protocol.EMule},
+			Pieces: protocol.NewBitField(1),
+		},
+	}
+	info.Resume.Pieces.SetBit(0)
+	if err := exportPartMetJSON(path, info); err != nil {
+		t.Fatalf("export json: %v", err)
+	}
+	// 仅 JSON 旁注时主 .part.met 不存在，直接测 ParsePartMetBytes
+	raw, err := os.ReadFile(path + ".part.met.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParsePartMetBytes(raw)
+	if err != nil {
+		t.Fatalf("parse json: %v", err)
+	}
+	if !got.Hash.Equal(protocol.EMule) {
+		t.Fatalf("hash %+v", got.Hash)
+	}
+}
+
+func TestGapsFromResumePartialPiece(t *testing.T) {
+	resume := &protocol.TransferResumeData{
+		Hashes: []protocol.Hash{protocol.EMule},
+		Pieces: protocol.NewBitField(1),
+		DownloadedBlocks: []data.PieceBlock{
+			data.NewPieceBlock(0, 0),
+		},
+	}
+	gaps := gapsFromResume(PieceSize, resume)
+	if len(gaps) != 1 {
+		t.Fatalf("expected 1 gap, got %d", len(gaps))
+	}
+	blockEnd := uint64(BlockSize)
+	if gaps[0].Start != blockEnd || gaps[0].End != uint64(PieceSize) {
+		t.Fatalf("unexpected gaps %+v", gaps)
+	}
+}

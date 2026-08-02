@@ -118,7 +118,7 @@ func (s *Session) PublishTransferToKADV6(t *Transfer) {
 	if tracker == nil {
 		return
 	}
-	if t.IsPaused() || t.IsAborted() || !t.isFinishedForSharePublish() {
+	if t.IsPaused() || t.IsAborted() || !t.isKadPublishable() {
 		return
 	}
 	tcpAddr := s.kadv6PublishEndpoint()
@@ -161,7 +161,7 @@ func (s *Session) publishAllFinishedTransfersKADV6(tcpAddr *net.TCPAddr) {
 	tracker := s.dhtv6Tracker
 	seen := make(map[string]struct{})
 	for _, t := range s.snapshotTransfers() {
-		if t == nil || t.IsPaused() || t.IsAborted() || !t.isFinishedForSharePublish() {
+		if t == nil || t.IsPaused() || t.IsAborted() || !t.isKadPublishable() {
 			continue
 		}
 		s.publishSingleTransferKADV6(tracker, tcpAddr, t)
