@@ -50,6 +50,13 @@ type Settings struct {
 	Categories              []Category
 	UseEmuleTempLayout      bool
 	PartialKadPublish       bool
+	PreallocateDiskSpace    bool
+	UseSparseFiles          bool
+	EnableWebDownload       bool
+	MaxHttpSources          int
+	MaxConcurrentHttpBlocks int
+	WebCacheDir             string
+	HttpRequestTimeoutSec   int
 }
 
 func NewSettings() Settings {
@@ -96,6 +103,10 @@ func NewSettings() Settings {
 		SecIdentRequired:        false,
 		CreditsOnlyVerified:     false,
 		PartialKadPublish:       true,
+		EnableWebDownload:       true,
+		MaxHttpSources:          4,
+		MaxConcurrentHttpBlocks: 2,
+		HttpRequestTimeoutSec:   30,
 	}
 }
 

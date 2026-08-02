@@ -757,6 +757,25 @@ func (c *Client) AddTransfer(atp AddTransferParams) (TransferHandle, error) {
 	return handle, err
 }
 
+// AddHttpSource 为指定任务添加 HTTP 下载源（支持 Range 请求）。
+func (c *Client) AddHttpSource(hash protocol.Hash, sourceURL string) error {
+	if c == nil || c.session == nil {
+		return errors.New("client is not started")
+	}
+	handle := c.FindTransfer(hash)
+	if !handle.IsValid() {
+		return errors.New("transfer not found")
+	}
+	if err := handle.transfer.AddHttpSource(sourceURL); err != nil {
+		return err
+	}
+	if err := c.saveStateIfConfigured(); err != nil {
+		return err
+	}
+	c.emitStatusUpdate()
+	return nil
+}
+
 func (c *Client) FindTransfer(hash protocol.Hash) TransferHandle {
 	return c.session.FindTransfer(hash)
 }
@@ -855,10 +874,11 @@ func (c *Client) ExportPartMetForTransfer(hash protocol.Hash) error {
 		return errors.New("transfer has no file path")
 	}
 	return ExportPartMet(path, PartMetInfo{
-		Hash:     handle.GetHash(),
-		FileSize: handle.transfer.Size(),
-		Filename: filepath.Base(path),
-		Resume:   handle.GetResumeData(),
+		Hash:        handle.GetHash(),
+		FileSize:    handle.transfer.Size(),
+		Filename:    filepath.Base(path),
+		Resume:      handle.GetResumeData(),
+		HttpSources: handle.transfer.HttpSources(),
 	})
 }
 

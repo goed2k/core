@@ -34,3 +34,14 @@ func TestApplyEmulePreferencesSetsTempLayout(t *testing.T) {
 		t.Fatal("expected UseEmuleTempLayout when TempDir set")
 	}
 }
+
+func TestApplyEmulePreferencesDiskOptions(t *testing.T) {
+	st := NewSettings()
+	ApplyEmulePreferences(&st, EmulePreferences{AllocFull: true, SparseFiles: true})
+	if !st.PreallocateDiskSpace {
+		t.Fatal("expected PreallocateDiskSpace")
+	}
+	if !st.UseSparseFiles {
+		t.Fatal("expected UseSparseFiles")
+	}
+}

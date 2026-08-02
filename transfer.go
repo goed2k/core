@@ -47,6 +47,7 @@ type Transfer struct {
 	aichPendingPiece   map[int]bool
 	previewMu          sync.Mutex
 	previewPieces      map[uint16][]byte
+	httpSources        *httpSourceManager
 }
 
 func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
@@ -88,6 +89,20 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 	}
 	if t.handler != nil {
 		t.pm = NewPieceManager(t.handler, t.numPieces, blocksInLastPiece)
+	}
+
+	if len(atp.HttpSources) > 0 {
+		t.httpSources = newHTTPSourceManager(atp.HttpSources)
+	} else {
+		t.httpSources = newHTTPSourceManager(nil)
+	}
+
+	if t.handler != nil && t.size > 0 && s != nil {
+		sparse := s.settings.UseSparseFiles
+		prealloc := s.settings.PreallocateDiskSpace
+		if sparse || prealloc {
+			_ = t.handler.Preallocate(t.size, sparse)
+		}
 	}
 
 	if atp.ResumeData != nil {
@@ -764,6 +779,7 @@ func (t *Transfer) SecondTick(accumulator *Statistics, tickIntervalMS int64) {
 		}
 		c.SecondTick(tickIntervalMS)
 	}
+	t.tickHttpSources()
 	t.refreshStats()
 	if accumulator != nil {
 		accumulator.Add(t.stat)
