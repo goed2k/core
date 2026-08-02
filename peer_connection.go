@@ -405,14 +405,11 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 		DataCompVer:        p.session.GetCompressionVersion(),
 		SourceExchange1Ver: 1,
 		NoViewSharedFiles:  1,
-		MultiPacket:        1,
-		SupportsPreview:    1,
 	}
 	var mo2 MiscOptions2
 	mo2.SetCaptcha()
 	mo2.SetLargeFiles()
 	mo2.SetSourceExt2()
-	mo2.SetExtMultipacket()
 	if p.session.settings.EnableSecIdent && p.session.Identity().Available() {
 		mo.SupportSecIdent = 1
 	}
@@ -1176,7 +1173,6 @@ func (p *PeerConnection) HandleFileStatusAnswer(value *clientproto.FileStatusAns
 		if p.transfer.GetHash().Equal(value.Hash) {
 			p.transfer.SetHashSet(value.Hash, []protocol.Hash{value.Hash})
 			p.maybeSendSourceExchange()
-			p.maybeSendPreviewRequest()
 			p.SendStartUpload(p.transfer.GetHash())
 		} else {
 			p.Close(HashMismatch)
@@ -1236,7 +1232,6 @@ func (p *PeerConnection) ProcessIncoming() error {
 					p.transfer.picker.GetPieceCount() == len(value.Parts) {
 					p.transfer.SetHashSet(value.Hash, value.Parts)
 					p.maybeSendSourceExchange()
-					p.maybeSendPreviewRequest()
 					p.SendStartUpload(p.transfer.GetHash())
 				} else {
 					p.Close(WrongHashSet)
@@ -1244,6 +1239,7 @@ func (p *PeerConnection) ProcessIncoming() error {
 			}
 		case *clientproto.AcceptUpload:
 			debugPeerf("peer %s <- AcceptUpload", p.endpoint.String())
+			p.maybeSendPreviewRequest()
 			p.RequestBlocks()
 		case *clientproto.StartUpload:
 			p.HandleClientStartUpload(value)

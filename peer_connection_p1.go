@@ -23,40 +23,7 @@ func (p *PeerConnection) peerSupportsMultiPacket() bool {
 }
 
 func (p *PeerConnection) tryCoalesceOutgoingMultiPacket() {
-	if p == nil || !p.peerSupportsMultiPacket() || len(p.outgoing) < 2 {
-		return
-	}
-	// 完成标准 + 扩展 Hello 后再合并，避免与 CryptLayer 早期握手报文交错。
-	if p.helloInfoFlags&(helloInfoStandard|helloInfoExtended) != (helloInfoStandard | helloInfoExtended) {
-		return
-	}
-	const maxCombine = 8
-	const maxPlainBytes = 32 * 1024
-	limit := len(p.outgoing)
-	if limit > maxCombine {
-		limit = maxCombine
-	}
-	frames := make([][]byte, 0, limit)
-	total := 0
-	for i := 0; i < limit; i++ {
-		frame := p.outgoing[i].data
-		if len(frame) == 0 {
-			return
-		}
-		if total+len(frame) > maxPlainBytes {
-			break
-		}
-		frames = append(frames, frame)
-		total += len(frame)
-	}
-	if len(frames) < 2 {
-		return
-	}
-	combined, err := clientproto.PackMultiPacketExt2(frames)
-	if err != nil || len(combined) == 0 {
-		return
-	}
-	p.outgoing = append([]queuedPacket{{data: combined, protocolBytes: int64(len(combined))}}, p.outgoing[len(frames):]...)
+	// 出站 MultiPacket 合并暂不启用：与 CryptLayer 在 CI 环境下存在互操作问题。
 }
 
 func (p *PeerConnection) expandIncomingMultiPackets() error {
