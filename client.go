@@ -556,7 +556,10 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return TransferHandle{}, "", err
 	}
-	targetPath := filepath.Join(outputDir, link.StringValue)
+	targetPath, cleanup, err := ResolveEmuleDownloadPath(c.session.settings, outputDir, link.StringValue)
+	if err != nil {
+		return TransferHandle{}, "", err
+	}
 	handler := disk.NewDesktopFileHandler(targetPath)
 	atp := NewAddTransferParamsFromHandler(link.Hash, CurrentTimeMillis(), link.NumberValue, handler, false)
 	atp.AICHRootHash = link.AICHRootHash
@@ -564,16 +567,18 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 		atp.PieceHashes = append(atp.PieceHashes, link.PartHashes...)
 	}
 	handle, err := c.session.AddTransferParams(atp)
-	if err == nil {
-		logx.Debug("transfer added", "file", link.StringValue, "hash", link.Hash.String(), "size", link.NumberValue, "path", targetPath)
-		if handle.transfer != nil {
-			requested := c.session.RequestSourcesNow(handle.transfer)
-			logx.Debug("initial source discovery requested", "hash", link.Hash.String(), "requested", requested)
-		}
-		_ = c.saveStateIfConfigured()
-		c.emitStatusUpdate()
-		c.emitTransferProgressUpdate(true)
+	if err != nil {
+		cleanup()
+		return handle, targetPath, err
 	}
+	logx.Debug("transfer added", "file", link.StringValue, "hash", link.Hash.String(), "size", link.NumberValue, "path", targetPath)
+	if handle.transfer != nil {
+		requested := c.session.RequestSourcesNow(handle.transfer)
+		logx.Debug("initial source discovery requested", "hash", link.Hash.String(), "requested", requested)
+	}
+	_ = c.saveStateIfConfigured()
+	c.emitStatusUpdate()
+	c.emitTransferProgressUpdate(true)
 	return handle, targetPath, err
 }
 

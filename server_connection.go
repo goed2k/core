@@ -100,6 +100,18 @@ func (s *ServerConnection) Endpoint() protocol.Endpoint {
 	return protocol.Endpoint{}
 }
 
+func (s *ServerConnection) SendFileSourcesObfuRequest(hash protocol.Hash, size int64) {
+	debugPeerf("server %s -> GetFileSourcesObfu %s size=%d", s.identifier, hash.String(), size)
+	packet := serverproto.GetFileSourcesObfu{
+		Hash:    hash,
+		LowPart: int32(LowPart(size)),
+		HiPart:  int32(HiPart(size)),
+	}
+	if raw, err := s.combiner.Pack("server.GetFileSourcesObfu", &packet); err == nil {
+		s.QueuePacket(raw)
+	}
+}
+
 func (s *ServerConnection) SendFileSourcesRequest(hash protocol.Hash, size int64) {
 	debugPeerf("server %s -> GetFileSources %s size=%d", s.identifier, hash.String(), size)
 	packet := serverproto.GetFileSources{
@@ -173,23 +185,10 @@ func (s *ServerConnection) ProcessIncoming() error {
 			s.OnServerIDChange(value.ClientID, value.TCPFlags, value.AuxPort, value.ReportedIP, value.ObfuscationTCPPort)
 		case *serverproto.FoundFileSources:
 			debugPeerf("server %s <- FoundFileSources hash=%s count=%d", s.identifier, value.Hash.String(), len(value.Sources))
-			if transfer := s.session.LookupTransfer(value.Hash); transfer != nil {
-				for _, ep := range value.Sources {
-					if IsLowID(ep.IP()) {
-						peer := NewPeerWithSource(protocol.Endpoint{}, true, int(PeerServer))
-						peer.ServerClientID = ep.IP()
-						if transfer.session != nil {
-							transfer.session.mu.Lock()
-						}
-						_, _ = transfer.policy.AddPeer(peer)
-						if transfer.session != nil {
-							transfer.session.mu.Unlock()
-						}
-					} else {
-						_ = transfer.AddPeer(ep, int(PeerServer))
-					}
-				}
-			}
+			s.mergeServerFileSources(value.Hash, value.Sources)
+		case *serverproto.FoundFileSourcesObfu:
+			debugPeerf("server %s <- FoundFileSourcesObfu hash=%s count=%d", s.identifier, value.Hash.String(), len(value.Sources))
+			s.mergeServerFileSourcesObfu(value.Hash, value.Sources)
 		case *serverproto.CallbackRequestIncoming:
 			debugPeerf("server %s <- CallbackRequestIncoming point=%s", s.identifier, value.Point.String())
 			s.session.OnCallbackRequestIncoming(value.Point)
@@ -231,4 +230,54 @@ func (s *ServerConnection) TCPFlags() int32 {
 
 func (s *ServerConnection) AuxPort() int32 {
 	return s.auxPort
+}
+
+func (s *ServerConnection) mergeServerFileSources(hash protocol.Hash, sources []protocol.Endpoint) {
+	transfer := s.session.LookupTransfer(hash)
+	if transfer == nil {
+		return
+	}
+	for _, ep := range sources {
+		if IsLowID(ep.IP()) {
+			peer := NewPeerWithSource(protocol.Endpoint{}, true, int(PeerServer))
+			peer.ServerClientID = ep.IP()
+			if transfer.session != nil {
+				transfer.session.mu.Lock()
+			}
+			_, _ = transfer.policy.AddPeer(peer)
+			if transfer.session != nil {
+				transfer.session.mu.Unlock()
+			}
+		} else {
+			_ = transfer.AddPeer(ep, int(PeerServer))
+		}
+	}
+}
+
+func (s *ServerConnection) mergeServerFileSourcesObfu(hash protocol.Hash, sources []serverproto.ObfuFileSource) {
+	transfer := s.session.LookupTransfer(hash)
+	if transfer == nil {
+		return
+	}
+	for _, src := range sources {
+		ep := src.Endpoint
+		var peer Peer
+		if IsLowID(ep.IP()) {
+			peer = NewPeerWithSource(protocol.Endpoint{}, true, int(PeerServer))
+			peer.ServerClientID = ep.IP()
+		} else {
+			peer = NewPeerWithSource(ep, true, int(PeerServer))
+		}
+		peer.CryptOptions = src.CryptOptions
+		if src.CryptOptions&serverproto.CryptOptionObfuUserHash != 0 {
+			peer.UserHash = src.UserHash
+		}
+		if transfer.session != nil {
+			transfer.session.mu.Lock()
+		}
+		_, _ = transfer.policy.AddPeer(peer)
+		if transfer.session != nil {
+			transfer.session.mu.Unlock()
+		}
+	}
 }

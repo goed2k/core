@@ -28,6 +28,11 @@ const (
 	opCompressedPart64  byte = 0xA1
 	opRequestSources2   byte = 0x83
 	opAnswerSources2    byte = 0x84
+	opRequestSources    byte = 0x81
+	opAnswerSources     byte = 0x82
+	opRequestPreview    byte = 0x90
+	opPreviewAnswer     byte = 0x91
+	opMultiPacketExt2   byte = 0xA9
 	opAICHRequest       byte = 0x9B
 	opAICHAnswer        byte = 0x9C
 	opAICHFileHashAns   byte = 0x9D
@@ -78,6 +83,10 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc.Register(protocol.PK(protocol.EMuleProt, opCompressedPart64), "client.CompressedPart64", func() protocol.Serializable { return &CompressedPart64{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opRequestSources2), "client.RequestSources2", func() protocol.Serializable { return &RequestSources2{} })
 	pc.Register(protocol.PK(protocol.EMuleProt, opAnswerSources2), "client.AnswerSources2", func() protocol.Serializable { return &AnswerSources2{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opRequestSources), "client.RequestSources", func() protocol.Serializable { return &RequestSources{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opAnswerSources), "client.AnswerSources", func() protocol.Serializable { return &AnswerSources{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opRequestPreview), "client.RequestPreview", func() protocol.Serializable { return &RequestPreview{} })
+	pc.Register(protocol.PK(protocol.EMuleProt, opPreviewAnswer), "client.PreviewAnswer", func() protocol.Serializable { return &PreviewAnswer{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHRequest), "client.AICHRequest", func() protocol.Serializable { return &AICHRequest{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHAnswer), "client.AICHAnswer", func() protocol.Serializable { return &AICHAnswer{} })
 	pc.Register(protocol.PK(protocol.EdonkeyProt, opAICHFileHashReq), "client.AICHFileHashRequest", func() protocol.Serializable { return &AICHFileHashRequest{} })
@@ -87,3 +96,6 @@ func NewPacketCombiner() protocol.PacketCombiner {
 	pc.Register(protocol.PK(protocol.EMuleProt, opSecIdentState), "client.SecIdentState", func() protocol.Serializable { return &SecIdentState{} })
 	return pc
 }
+
+// MultiPacketOpcode 返回 OP_MULTIPACKET_EXT2 操作码（供连接层识别）。
+func MultiPacketOpcode() byte { return opMultiPacketExt2 }

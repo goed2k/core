@@ -48,6 +48,8 @@ type Settings struct {
 	CreditsOnlyVerified     bool
 	IdentityKeyPath         string
 	Categories              []Category
+	UseEmuleTempLayout      bool
+	PartialKadPublish       bool
 }
 
 func NewSettings() Settings {
@@ -57,8 +59,8 @@ func NewSettings() Settings {
 	}
 	return Settings{
 		UserAgent:               userAgent,
-		ModName:                 "jed2k",
-		ClientName:              "jed2k",
+		ModName:                 "goed2k",
+		ClientName:              "goed2k",
 		ListenPort:              4661,
 		UDPPort:                 4662,
 		UDPPortV6:               4672,
@@ -67,7 +69,7 @@ func NewSettings() Settings {
 		EnableUPnP:              false,
 		Version:                 0x3c,
 		ModMajor:                0,
-		ModMinor:                0,
+		ModMinor:                1,
 		ModBuild:                0,
 		MaxFailCount:            20,
 		MaxPeerListSize:         100,
@@ -93,6 +95,7 @@ func NewSettings() Settings {
 		EnableSecIdent:          false,
 		SecIdentRequired:        false,
 		CreditsOnlyVerified:     false,
+		PartialKadPublish:       true,
 	}
 }
 

@@ -66,6 +66,7 @@ type Session struct {
 	identity                   *IdentityState
 	ipFilter                   *IPFilter
 	bannedPeers                map[string]protocol.Endpoint
+	udpReachable               bool
 }
 
 type serverMetEntryMeta struct {
@@ -325,11 +326,15 @@ func (s *Session) GetModBuildVersion() int {
 
 func (s *Session) SendSourcesRequest(hash protocol.Hash, size int64) bool {
 	sent := false
+	useObfu := s.settings.EnableCryptLayer || s.settings.CryptLayerRequired
 	for _, sc := range s.activeServerConnections() {
 		if sc == nil || !sc.IsHandshakeCompleted() {
 			continue
 		}
 		sc.SendFileSourcesRequest(hash, size)
+		if useObfu {
+			sc.SendFileSourcesObfuRequest(hash, size)
+		}
 		sent = true
 	}
 	return sent
@@ -1031,6 +1036,7 @@ func (s *Session) SetDHTTracker(tracker *DHTTracker) {
 	s.dhtTracker = tracker
 	if tracker != nil {
 		tracker.SetED2KUDPHandler(func(addr *net.UDPAddr, buf []byte) {
+			s.handleClientUDP(addr, buf)
 			s.handleGlobServStatUDP(addr, buf)
 		})
 	}

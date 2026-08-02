@@ -405,11 +405,14 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 		DataCompVer:        p.session.GetCompressionVersion(),
 		SourceExchange1Ver: 1,
 		NoViewSharedFiles:  1,
+		MultiPacket:        1,
+		SupportsPreview:    1,
 	}
 	var mo2 MiscOptions2
 	mo2.SetCaptcha()
 	mo2.SetLargeFiles()
 	mo2.SetSourceExt2()
+	mo2.SetExtMultipacket()
 	if p.session.settings.EnableSecIdent && p.session.Identity().Available() {
 		mo.SupportSecIdent = 1
 	}
@@ -1172,7 +1175,8 @@ func (p *PeerConnection) HandleFileStatusAnswer(value *clientproto.FileStatusAns
 	} else if p.transfer != nil {
 		if p.transfer.GetHash().Equal(value.Hash) {
 			p.transfer.SetHashSet(value.Hash, []protocol.Hash{value.Hash})
-			p.maybeSendRequestSources2()
+			p.maybeSendSourceExchange()
+			p.maybeSendPreviewRequest()
 			p.SendStartUpload(p.transfer.GetHash())
 		} else {
 			p.Close(HashMismatch)
@@ -1181,6 +1185,9 @@ func (p *PeerConnection) HandleFileStatusAnswer(value *clientproto.FileStatusAns
 }
 
 func (p *PeerConnection) ProcessIncoming() error {
+	if err := p.expandIncomingMultiPackets(); err != nil {
+		return err
+	}
 	headers, bodies, err := p.ReadFramesWithCombiner(&p.combiner)
 	if err != nil {
 		return err
@@ -1228,7 +1235,8 @@ func (p *PeerConnection) ProcessIncoming() error {
 					p.transfer.GetHash().Equal(protocol.HashFromHashSet(value.Parts)) &&
 					p.transfer.picker.GetPieceCount() == len(value.Parts) {
 					p.transfer.SetHashSet(value.Hash, value.Parts)
-					p.maybeSendRequestSources2()
+					p.maybeSendSourceExchange()
+					p.maybeSendPreviewRequest()
 					p.SendStartUpload(p.transfer.GetHash())
 				} else {
 					p.Close(WrongHashSet)
@@ -1278,6 +1286,14 @@ func (p *PeerConnection) ProcessIncoming() error {
 			p.HandleRequestSources2(value)
 		case *clientproto.AnswerSources2:
 			p.HandleAnswerSources2(value)
+		case *clientproto.RequestSources:
+			p.HandleRequestSources(value)
+		case *clientproto.AnswerSources:
+			p.HandleAnswerSources(value)
+		case *clientproto.RequestPreview:
+			p.HandleClientRequestPreview(value)
+		case *clientproto.PreviewAnswer:
+			p.HandlePreviewAnswer(value)
 		case *clientproto.AICHAnswer:
 			p.HandleAICHAnswer(value)
 		case *clientproto.AICHFileHashAnswer:
@@ -1673,16 +1689,7 @@ func parseHelloTagList(dst *RemotePeerInfo, props *protocol.TagList) {
 }
 
 func (p *PeerConnection) maybeSendRequestSources2() {
-	if p.sourceExchangeSent || p.transfer == nil {
-		return
-	}
-	if p.remotePeerInfo.Misc1.SourceExchange1Ver == 0 {
-		return
-	}
-	if err := p.SendRequestSources2(p.transfer.GetHash()); err != nil {
-		return
-	}
-	p.sourceExchangeSent = true
+	p.maybeSendSourceExchange()
 }
 
 func (p *PeerConnection) SendRequestSources2(hash protocol.Hash) error {
