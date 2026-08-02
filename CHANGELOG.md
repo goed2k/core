@@ -6,17 +6,30 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-02
+
 ### 新增
 
-- **eMule 二进制 `.part.met`**：`ExportPartMet` 默认写出 eMule/aMule 兼容格式；`ImportPartMet` / `ParsePartMetBytes` 自动识别二进制与 goed2k JSON；保留 `.part.met.json` 旁注
-- **Source Exchange v5（IPv6 扩展）**：`AnswerSources2` 版本 5 在 v4 条目后追加 16 字节 IPv6；Hello 标签 `0x3B` 协商能力
-- **eMule `ipfilter.dat` 格式**：`LoadIPFilter` / `ParseIPFilterBytes` 支持 PeerGuardian 与 AntiP2P 文本格式及 AccessLevel 过滤级别
+- **HTTP 下载源 / Web 缓存**：`Client.AddHttpSource`、HTTP Range 并行拉块、`WebCacheDir` 本地块缓存、`PeerWeb` 源标签
+- **Sparse / 预分配磁盘**：`FileHandler.Preallocate`、`PreallocateDiskSpace` / `UseSparseFiles` 设置；eMule 配置 `AllocFull` / `SparseFiles` 映射
+- **P1 eMule/aMule 兼容**：SX1 (0x81/0x82)、Preview 入站、MultiPacket 入站合并、GetSourcesObfu、UDP ReAsk、eMule 配置导入、NNN.part 布局、KAD 部分发布
+- **P0 eMule/aMule 兼容**：eMule 二进制 `.part.met` 导入导出、Source Exchange v5（IPv6 扩展）、`ipfilter.dat` 解析
+- **兼容性文档**：`docs/emule-amule-compat-CN.md` 已实现/差距对照
 - **互操作回归**：SecIdent 双端上传、CryptLayer 强制模式、IPv6 SX 条目合并测试
 
 ### 变更
 
-- `ExportPartMet` 签名改为接收 `PartMetInfo`（含 hash、size、resume）
-- `IPFilter` 支持按 AccessLevel 与 FilterLevel（默认 127）判定；简单 CIDR 列表仍为无条件拒绝
+- `ExportPartMet` 签名改为接收 `PartMetInfo`（含 hash、size、resume、http_sources）
+- `IPFilter` 支持按 AccessLevel 与 FilterLevel（默认 127）判定
+- `ClientTransferState` / `.part.met.json` 持久化 `http_sources`
+- 出站 MultiPacket 合并暂时禁用（与 CryptLayer 握手冲突，待后续修复）
+
+### 修复
+
+- CryptLayer 本地双端联调与混淆拨号修复
+- MultiPacket 握手阶段不合并出站帧
+- Windows CI：传输/磁盘测试结束关闭文件句柄；`DesktopFileHandler` 并发 `Close` 加锁
+- CodeQL：`unix.Fallocate` 替代手动 `uintptr` 转换
 
 ## [0.1.2] - 2026-07-29
 
@@ -103,7 +116,7 @@
 - 纯 IPv6 来源不参与 `AnswerSources2` 广播
 - Secure Ident / CryptLayer 默认关闭；可通过 CLI/TUI 启用
 - KADV6 发布在无可用 IPv6 端点时静默跳过
-- `.part.met` 为 goed2k JSON 格式，非 eMule 原生二进制
+- `.part.met` 续传元数据以 eMule 二进制为主格式，goed2k JSON 为旁注；下载中不自动维护，需 `ExportPartMet` 或 `state.json`
 
 ## [0.0.2] - 2026-04-09
 
@@ -116,6 +129,8 @@
 
 - 初始公开版本，模块路径 `github.com/goed2k/core`
 
+[0.1.3]: https://github.com/goed2k/core/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/goed2k/core/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/goed2k/core/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/goed2k/core/compare/v0.0.2...v0.1.0
 [0.0.2]: https://github.com/goed2k/core/compare/v0.0.1...v0.0.2

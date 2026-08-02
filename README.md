@@ -108,7 +108,7 @@ go install github.com/goed2k/core/cmd/goed2k@latest
 ### 作为库
 
 ```bash
-go get github.com/goed2k/core@v0.1.2
+go get github.com/goed2k/core@v0.1.3
 ```
 
 守护进程或自定义程序可复用 `github.com/goed2k/core/bootstrap` 进行客户端初始化（见 [bootstrap/doc.go](bootstrap/doc.go)）。
