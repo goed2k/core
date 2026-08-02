@@ -26,6 +26,10 @@ func (p *PeerConnection) tryCoalesceOutgoingMultiPacket() {
 	if p == nil || !p.peerSupportsMultiPacket() || len(p.outgoing) < 2 {
 		return
 	}
+	// 完成标准 + 扩展 Hello 后再合并，避免与 CryptLayer 早期握手报文交错。
+	if p.helloInfoFlags&(helloInfoStandard|helloInfoExtended) != (helloInfoStandard | helloInfoExtended) {
+		return
+	}
 	const maxCombine = 8
 	const maxPlainBytes = 32 * 1024
 	limit := len(p.outgoing)
@@ -87,7 +91,7 @@ func (p *PeerConnection) expandIncomingMultiPackets() error {
 		frames, err := clientproto.UnpackMultiPacketExt2(body)
 		if err != nil {
 			p.prependIncoming(raw)
-			return err
+			return nil
 		}
 		if len(frames) == 0 {
 			p.prependIncoming(raw)
