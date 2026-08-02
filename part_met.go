@@ -144,11 +144,6 @@ func importEmulePartMet(raw []byte) (PartMetInfo, error) {
 		return PartMetInfo{}, err
 	}
 	resume := resumeFromGaps(size, met.PieceHashes, gaps)
-	for _, tag := range met.Tags {
-		if tag.NameID == protocol.FTPartFilename && tag.String != "" {
-			// optional temp name tag
-		}
-	}
 	return PartMetInfo{
 		Hash:     met.Hash,
 		FileSize: size,
