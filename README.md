@@ -47,6 +47,7 @@ Web 控制台请使用独立仓库 [goed2k/daemon](https://github.com/goed2k/dae
 - [本地共享库与周边能力：分阶段实现说明（中文）](docs/library-implementation-phases-CN.md)
 - [Kademlia v6 协议说明（中文）](docs/kadv6-protocol-CN.md)
 - [客户端来源交换（Source Exchange）实现说明（中文）](docs/source-exchange-CN.md)
+- [**goed2k 与 eMule/aMule 兼容性说明（中文）**](docs/emule-amule-compat-CN.md)
 - [Secure Ident 计划](docs/secure-ident-plan.md)
 - [版本变更记录（CHANGELOG）](CHANGELOG.md)
 

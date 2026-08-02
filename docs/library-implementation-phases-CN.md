@@ -158,6 +158,7 @@
 
 | 主题 | 文档 |
 |------|------|
+| **eMule/aMule 兼容性** | [emule-amule-compat-CN.md](emule-amule-compat-CN.md) |
 | Source Exchange | [source-exchange-CN.md](source-exchange-CN.md) |
 | Kad v6 协议 | [kadv6-protocol-CN.md](kadv6-protocol-CN.md) |
 | Kad 实现计划 | [kadv6-implementation-plan.md](kadv6-implementation-plan.md) |
