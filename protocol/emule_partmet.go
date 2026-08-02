@@ -472,13 +472,13 @@ func BuildEmulePartMet(opts EmulePartMetOptions) ([]byte, error) {
 
 // EmulePartMetOptions 为导出 eMule .part.met 所需参数。
 type EmulePartMetOptions struct {
-	Hash         Hash
-	FileSize     int64
-	Filename     string
-	Transferred  uint64
-	Modified     uint32
-	PieceHashes  []Hash
-	Gaps         []PartMetGap
+	Hash        Hash
+	FileSize    int64
+	Filename    string
+	Transferred uint64
+	Modified    uint32
+	PieceHashes []Hash
+	Gaps        []PartMetGap
 }
 
 // WriteEmulePartMet 原子写入 eMule 二进制 .part.met。

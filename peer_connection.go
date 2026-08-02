@@ -106,17 +106,17 @@ func (m *MiscOptions2) SetLargeFiles()             { m.Value |= 1 << largeFileOf
 func (m *MiscOptions2) Assign(value int)           { m.Value = value }
 
 type RemotePeerInfo struct {
-	Point           protocol.Endpoint
-	NickName        string
-	ModName         string
-	Version         int
-	ModVersion      string
-	ModNumber       int
-	Misc1           MiscOptions
-	Misc2               MiscOptions2
-	SourceExchange2Ver  byte
-	SecIdentVersion     int
-	SecIdentKeyFP   uint32
+	Point              protocol.Endpoint
+	NickName           string
+	ModName            string
+	Version            int
+	ModVersion         string
+	ModNumber          int
+	Misc1              MiscOptions
+	Misc2              MiscOptions2
+	SourceExchange2Ver byte
+	SecIdentVersion    int
+	SecIdentKeyFP      uint32
 }
 
 type PendingBlock struct {
@@ -1615,13 +1615,13 @@ func (p *PeerConnection) asyncWrite(block data.PieceBlock, buffer []byte, transf
 }
 
 const (
-	helloTagNickName = 0x01
-	helloTagVersion  = 0x11
-	helloTagModName  = 0x55
-	helloTagModVer   = 0xFB
-	helloTagMisc1               = 0xFA
-	helloTagMisc2               = 0xFE
-	helloTagSourceExchange2Ver  = 0x3B
+	helloTagNickName           = 0x01
+	helloTagVersion            = 0x11
+	helloTagModName            = 0x55
+	helloTagModVer             = 0xFB
+	helloTagMisc1              = 0xFA
+	helloTagMisc2              = 0xFE
+	helloTagSourceExchange2Ver = 0x3B
 )
 
 func helloStringFromTag(t protocol.SimpleTag) string {

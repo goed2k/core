@@ -3,20 +3,20 @@ package server
 import "github.com/goed2k/core/protocol"
 
 const (
-	opGetServerList   byte = 0x14
-	opOfferFiles      byte = 0x15
-	opSearchRequest   byte = 0x16
-	opGetSources      byte = 0x19
-	opGetSourcesObfu  byte = 0x23
-	opCallbackRequest byte = 0x1C
-	opQueryMore       byte = 0x21
-	opSearchResult    byte = 0x33
-	opServerStatus    byte = 0x34
-	opCallbackReqIn   byte = 0x35
-	opCallbackFail    byte = 0x36
-	opServerMessage   byte = 0x38
-	opIDChange        byte = 0x40
-	opFoundSources    byte = 0x42
+	opGetServerList    byte = 0x14
+	opOfferFiles       byte = 0x15
+	opSearchRequest    byte = 0x16
+	opGetSources       byte = 0x19
+	opGetSourcesObfu   byte = 0x23
+	opCallbackRequest  byte = 0x1C
+	opQueryMore        byte = 0x21
+	opSearchResult     byte = 0x33
+	opServerStatus     byte = 0x34
+	opCallbackReqIn    byte = 0x35
+	opCallbackFail     byte = 0x36
+	opServerMessage    byte = 0x38
+	opIDChange         byte = 0x40
+	opFoundSources     byte = 0x42
 	opFoundSourcesObfu byte = 0x44
 )
 
