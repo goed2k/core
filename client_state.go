@@ -63,6 +63,7 @@ type ClientTransferState struct {
 	UploadPrio   UploadPriority               `json:"upload_prio,omitempty"`
 	DownloadPrio TransferPriority             `json:"download_prio,omitempty"`
 	ResumeData   *protocol.TransferResumeData `json:"resume_data,omitempty"`
+	HttpSources  []string                     `json:"http_sources,omitempty"`
 }
 
 type ClientDHTState struct {
@@ -275,6 +276,7 @@ func (c *Client) snapshotState() (*ClientState, error) {
 			UploadPrio:   handle.transfer.UploadPriority(),
 			DownloadPrio: handle.transfer.DownloadPriority(),
 			ResumeData:   handle.GetResumeData(),
+			HttpSources:  handle.transfer.HttpSources(),
 		})
 	}
 	return state, nil
@@ -357,13 +359,14 @@ func (c *Client) applyState(state *ClientState) error {
 			return err
 		}
 		atp := AddTransferParams{
-			Hash:       record.Hash,
-			CreateTime: record.CreateTime,
-			Size:       record.Size,
-			FilePath:   record.TargetPath,
-			Paused:     record.Paused,
-			ResumeData: cloneResumeData(record.ResumeData),
-			Handler:    disk.NewDesktopFileHandler(record.TargetPath),
+			Hash:        record.Hash,
+			CreateTime:  record.CreateTime,
+			Size:        record.Size,
+			FilePath:    record.TargetPath,
+			Paused:      record.Paused,
+			ResumeData:  cloneResumeData(record.ResumeData),
+			Handler:     disk.NewDesktopFileHandler(record.TargetPath),
+			HttpSources: append([]string(nil), record.HttpSources...),
 		}
 		handle, err := c.session.AddTransferParams(atp)
 		if err != nil {

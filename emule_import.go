@@ -23,6 +23,8 @@ type EmulePreferences struct {
 	ServerPort        int
 	TempDir           string
 	IncomingDir       string
+	AllocFull         bool
+	SparseFiles       bool
 }
 
 // ParseEmulePreferencesINI 解析 eMule preferences.ini / aMule amule.conf 风格键值。
@@ -73,6 +75,10 @@ func ParseEmulePreferencesINI(text string) (EmulePreferences, error) {
 			out.TempDir = val
 		case "incomingdir", "incomingdirectory":
 			out.IncomingDir = val
+		case "allocfull", "preallocatediskspace":
+			out.AllocFull = parseBool(val)
+		case "sparsefiles", "usesparsefiles":
+			out.SparseFiles = parseBool(val)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -138,6 +144,12 @@ func ApplyEmulePreferences(settings *Settings, prefs EmulePreferences) {
 	}
 	if prefs.TempDir != "" {
 		settings.UseEmuleTempLayout = true
+	}
+	if prefs.AllocFull {
+		settings.PreallocateDiskSpace = true
+	}
+	if prefs.SparseFiles {
+		settings.UseSparseFiles = true
 	}
 }
 

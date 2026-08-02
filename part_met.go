@@ -25,6 +25,7 @@ type PartMetDocument struct {
 	CompletedPieces  []bool          `json:"completed_pieces,omitempty"`
 	DownloadedBlocks []partMetBlock  `json:"downloaded_blocks,omitempty"`
 	KnownPeers       []string        `json:"known_peers,omitempty"`
+	HttpSources      []string        `json:"http_sources,omitempty"`
 }
 
 type partMetBlock struct {
@@ -34,10 +35,11 @@ type partMetBlock struct {
 
 // PartMetInfo 为导入/导出 .part.met 的统一结构。
 type PartMetInfo struct {
-	Hash     protocol.Hash
-	FileSize int64
-	Filename string
-	Resume   *protocol.TransferResumeData
+	Hash        protocol.Hash
+	FileSize    int64
+	Filename    string
+	Resume      *protocol.TransferResumeData
+	HttpSources []string
 }
 
 // ExportPartMet 导出 eMule 二进制 .part.met（主格式）及 goed2k JSON 旁注（.part.met.json）。
@@ -101,6 +103,9 @@ func exportPartMetJSON(path string, info PartMetInfo) error {
 		if peer.Defined() {
 			doc.KnownPeers = append(doc.KnownPeers, peer.String())
 		}
+	}
+	if len(info.HttpSources) > 0 {
+		doc.HttpSources = append([]string(nil), info.HttpSources...)
 	}
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -199,6 +204,7 @@ func importGoed2kPartMetJSON(raw []byte) (PartMetInfo, error) {
 			DownloadedBlocks: blocks,
 			Peers:            peers,
 		},
+		HttpSources: append([]string(nil), doc.HttpSources...),
 	}, nil
 }
 

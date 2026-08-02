@@ -18,6 +18,7 @@ type AddTransferParams struct {
 	ResumeData   *protocol.TransferResumeData
 	Handler      disk.FileHandler
 	PieceHashes  []protocol.Hash
+	HttpSources  []string
 }
 
 func NewAddTransferParamsFromFile(h protocol.Hash, createTime int64, size int64, file *os.File, paused bool) AddTransferParams {

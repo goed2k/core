@@ -10,6 +10,9 @@ type FileHandler interface {
 	Path() string
 	Close() error
 	DeleteFile() error
+	// Preallocate 将文件扩展到 size。sparse 为 true 时仅扩展逻辑大小（稀疏文件），
+	// 为 false 时尽量在磁盘上预分配连续空间。
+	Preallocate(size int64, sparse bool) error
 }
 
 type DesktopFileHandler struct {
@@ -60,4 +63,21 @@ func (h *DesktopFileHandler) DeleteFile() error {
 		return errors.New("unable to delete file")
 	}
 	return nil
+}
+
+func (h *DesktopFileHandler) Preallocate(size int64, sparse bool) error {
+	if size <= 0 {
+		return nil
+	}
+	file, err := h.ensureFile(os.O_RDWR | os.O_CREATE)
+	if err != nil {
+		return err
+	}
+	if err := file.Truncate(size); err != nil {
+		return err
+	}
+	if sparse {
+		return setSparseFile(file)
+	}
+	return allocateDiskSpace(file, size)
 }
