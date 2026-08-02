@@ -49,6 +49,7 @@ func TestTransferHttpSourceDownloadsBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add transfer: %v", err)
 	}
+	registerTransferFileCleanup(t, handle)
 	transfer := handle.transfer
 
 	deadline := CurrentTime() + Seconds(5)
@@ -112,6 +113,7 @@ func TestWebCacheStoresDownloadedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add transfer: %v", err)
 	}
+	registerTransferFileCleanup(t, handle)
 	transfer := handle.transfer
 	block := data.NewPieceBlock(0, 0)
 

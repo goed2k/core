@@ -10,6 +10,7 @@ func TestDesktopFileHandlerPreallocateSparse(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sparse.bin")
 	handler := NewDesktopFileHandler(path)
+	defer func() { _ = handler.Close() }()
 
 	const size int64 = 1_000_000
 	if err := handler.Preallocate(size, true); err != nil {
@@ -28,6 +29,7 @@ func TestDesktopFileHandlerPreallocateFull(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "full.bin")
 	handler := NewDesktopFileHandler(path)
+	defer func() { _ = handler.Close() }()
 
 	const size int64 = 64 * 1024
 	if err := handler.Preallocate(size, false); err != nil {
