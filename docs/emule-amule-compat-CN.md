@@ -55,7 +55,7 @@
 
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
-| **高级搜索：Server 最小布尔树已覆盖；KADV6 统一搜索仍待接入** | `SearchRequest` 解析 `OR`/`NOT`/`-word`，左结合默认 AND；过滤条件仍 AND 到查询树上。不支持括号嵌套。Kad 关键字仍取最长词，跳过 AND/OR/NOT。`startDHTSearch` 仍只走 Kad4；`SearchDHTv6Keywords` 未纳入 `StartSearch`。 | 服务器搜索可表达简单 OR/排除；括号复杂式仍不一致。IPv6-only 结果仍不出现在常规搜索。 | 中高 | 已有 OR/NOT/`-word` 解析与编码、默认 AND、过滤条件仍 AND 测试。括号/引号与 KADV6 合并为后续项。 |
+| **高级搜索：Server 最小布尔树已覆盖；KADV6 统一搜索仍待接入** | `SearchRequest` 解析 `OR`/`NOT`/`-word`，左结合默认 AND；过滤条件仍 AND 到查询树上。不支持括号嵌套。普通词仍按原标点切开。Kad 关键字取正向词中最长者，跳过 AND/OR/NOT 与 NOT 操作数。`startDHTSearch` 仍只走 Kad4；`SearchDHTv6Keywords` 未纳入 `StartSearch`。 | 服务器搜索可表达简单 OR/排除；括号复杂式仍不一致。IPv6-only 结果仍不出现在常规搜索。 | 中高 | 已有 OR/NOT/`-word`、标点分词、默认 AND、过滤条件仍 AND、Kad 跳过排除词测试。括号/引号与 KADV6 合并为后续项。 |
 | **Buddy/PeerCache 生命周期缺失** | `protocol/kad/` 有 Buddy 相关标签/报文，`session_callback.go` 有部分 callback/find buddy 路径；未见完整 Buddy 选举、保活、重连状态机，也未见 PeerCache 实现。 | LowID/NAT 场景回调可靠性和缓存加速能力低于完整客户端。 | 高 | 双 NAT/LowID 环境做 Buddy 建立、失效、替换和回调测试；PeerCache 需先按独立威胁模型与真实协议 fixture 验证。 |
 | **Kad2 与 Kad4↔KADV6 桥接缺失** | `protocol/kad/` 与 `protocol/kadv6/` 是独立实现；`docs/kadv6-protocol*.md` 明确当前无桥接，仓库未见 Kad2 状态机。 | 无法参与对应网络或跨叠加层共享来源。 | 很高 | 先形成协议设计和安全边界 RFC；使用独立互操作节点验证路由、发布、搜索、去环和隐私，不与其他 P0/P1 改动同 PR。 |
 | **`NNN.part` 完成后重命名已覆盖最小闭环** | `UseEmuleTempLayout` 下任务完成后把 `NNN.part` 关文件再搬到 `IncomingDir`（空则同目录）下的清洗后最终名。目标已存在且大小相同视为崩溃重试；大小不同则用 `name (n).ext`。同卷 `Rename`，失败则复制后删源。完成后删除 `.met` 旁注。`FinalName` 随 state 保存。未做跨卷事务日志或 Windows 占用重试队列。 | 临时布局完成后不再长期停在 `001.part`。目标冲突不会覆盖不同内容。 | 中 | 已有同目录改名、Incoming 冲突改名、同大小崩溃重试、穿越名清洗、`finished()` 后路径/内容测试。跨卷复制依赖本机文件系统。 |

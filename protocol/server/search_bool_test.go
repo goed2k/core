@@ -27,6 +27,25 @@ func TestParseSearchQueryDashNOTAndDefaultAND(t *testing.T) {
 	}
 }
 
+func TestParseSearchQuerySplitsPunctuationLikeOldTokenizer(t *testing.T) {
+	t.Parallel()
+	ops, words := parseSearchQuery("artist - title.mp3")
+	if len(words) != 3 || words[0] != "artist" || words[1] != "title" || words[2] != "mp3" {
+		t.Fatalf("words %+v", words)
+	}
+	if len(ops) != 2 || ops[0] != searchBoolAND || ops[1] != searchBoolAND {
+		t.Fatalf("ops %+v", ops)
+	}
+}
+
+func TestTokenizeSearchQuerySkipsNOTOperands(t *testing.T) {
+	t.Parallel()
+	got := TokenizeSearchQuery("foo NOT barbaz OR qux")
+	if len(got) != 2 || got[0] != "foo" || got[1] != "qux" {
+		t.Fatalf("included words %+v", got)
+	}
+}
+
 func TestSearchRequestORGoldenBytes(t *testing.T) {
 	t.Parallel()
 	packet := SearchRequest{Query: "foo OR bar"}

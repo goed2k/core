@@ -13,6 +13,12 @@ func TestPickKadKeywordSkipsBooleanOperators(t *testing.T) {
 	if got := pickKadKeyword("foo OR barbaz NOT x"); got != "barbaz" {
 		t.Fatalf("got %q want barbaz", got)
 	}
+	if got := pickKadKeyword("foo NOT longestword"); got != "foo" {
+		t.Fatalf("excluded longest word should not be Kad keyword, got %q", got)
+	}
+	if got := pickKadKeyword("artist - title.mp3"); got != "artist" {
+		t.Fatalf("punctuation should split Kad words, got %q want artist", got)
+	}
 	if got := pickKadKeyword("AND OR NOT"); got != "" {
 		t.Fatalf("operators-only query should not pick a Kad word, got %q", got)
 	}

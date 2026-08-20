@@ -313,8 +313,15 @@ func (s searchNumericTerm) bytesCount() int {
 }
 
 func TokenizeSearchQuery(query string) []string {
-	_, words := parseSearchQuery(query)
-	return words
+	ops, words := parseSearchQuery(query)
+	out := make([]string, 0, len(words))
+	for i, word := range words {
+		if i > 0 && i-1 < len(ops) && ops[i-1] == searchBoolNOT {
+			continue
+		}
+		out = append(out, word)
+	}
+	return out
 }
 
 func tokenizeSearchQuery(query string) []string {
@@ -344,10 +351,29 @@ func putSearchTerms(dst *bytes.Buffer, terms []searchTerm, ops []byte) error {
 
 // parseSearchQuery 解析最小布尔查询：默认 AND；OR / NOT（或 -word）为二元算子。
 // 左结合，不支持括号。单独的前导算子忽略。
+// 普通词仍按原分词器切开点/下划线/连字符等，以便与 Kad 索引词对齐；
+// `-word` 的操作数只去边缘标点，避免把排除项拆成 AND。
 func parseSearchQuery(query string) (ops []byte, words []string) {
 	raw := strings.Fields(strings.TrimSpace(query))
 	pendingOp := byte(0)
 	hasPending := false
+	appendWord := func(word string, forcedOp byte, force bool) {
+		if word == "" {
+			return
+		}
+		if len(words) > 0 {
+			switch {
+			case force:
+				ops = append(ops, forcedOp)
+			case hasPending:
+				ops = append(ops, pendingOp)
+			default:
+				ops = append(ops, searchBoolAND)
+			}
+		}
+		words = append(words, word)
+		hasPending = false
+	}
 	for _, field := range raw {
 		field = strings.TrimSpace(field)
 		if field == "" {
@@ -370,26 +396,27 @@ func parseSearchQuery(query string) (ops []byte, words []string) {
 				words = append(words, word)
 				continue
 			}
-			ops = append(ops, searchBoolNOT)
-			words = append(words, word)
-			hasPending = false
+			appendWord(word, searchBoolNOT, true)
 			continue
 		}
-		word := strings.Trim(field, "()[]{}<>,._!?:;\\/\"")
-		if word == "" {
-			continue
+		for _, word := range splitSearchWord(field) {
+			appendWord(word, 0, false)
 		}
-		if len(words) > 0 {
-			if hasPending {
-				ops = append(ops, pendingOp)
-			} else {
-				ops = append(ops, searchBoolAND)
-			}
-		}
-		words = append(words, word)
-		hasPending = false
 	}
 	return ops, words
+}
+
+func splitSearchWord(field string) []string {
+	parts := strings.FieldsFunc(field, func(r rune) bool {
+		return strings.ContainsRune(" ()[]{}<>,._-!?:;\\/\"\t\r\n", r)
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func searchOperator(field string) (byte, bool) {
