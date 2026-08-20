@@ -4,7 +4,7 @@ import "errors"
 
 const (
 	prPieceSize int64 = 9728000
-	prBlockSize int64 = 190 * 1024
+	prBlockSize int64 = 180 * 1024
 )
 
 var (

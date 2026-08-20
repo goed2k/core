@@ -12,7 +12,7 @@ import (
 
 func TestMigrateClientStateAcceptsHistoricalVersions(t *testing.T) {
 	t.Parallel()
-	for _, v := range []int{0, 1, 2, 3, 4, 5, 6, 7, 8} {
+	for _, v := range []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9} {
 		st := &ClientState{Version: v, ServerAddress: "1.2.3.4:4661"}
 		if err := migrateClientState(st); err != nil {
 			t.Fatalf("version %d: %v", v, err)

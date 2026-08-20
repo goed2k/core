@@ -97,10 +97,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 	if len(atp.PieceHashes) > 0 {
 		t.hashSet = append(t.hashSet, atp.PieceHashes...)
 	}
-	blocksInLastPiece := int(DivCeil(atp.Size%PieceSize, BlockSize))
-	if blocksInLastPiece == 0 {
-		blocksInLastPiece = 1
-	}
+	blocksInLastPiece := blocksInLastPieceForSize(atp.Size)
 	t.picker = NewPiecePicker(t.numPieces, blocksInLastPiece)
 	t.policy = NewPolicy(t)
 
@@ -1094,12 +1091,43 @@ func (t *Transfer) tryAICHRecoverPiece(pieceIndex int) bool {
 }
 
 func (t *Transfer) resetOverlappingDownloadBlocks(pieceIndex int, begin, end int64) {
-	blockBegin := int((begin - int64(pieceIndex)*AICHPieceSize) / BlockSize)
-	blockEnd := int((end - int64(pieceIndex)*AICHPieceSize + BlockSize - 1) / BlockSize)
-	for blockIndex := blockBegin; blockIndex <= blockEnd; blockIndex++ {
-		block := data.NewPieceBlock(pieceIndex, blockIndex)
-		t.picker.AbortDownload(block, nil)
+	first, last, ok := overlappingDownloadBlocks(pieceIndex, begin, end, t.pieceSize(pieceIndex))
+	if !ok {
+		return
 	}
+	for blockIndex := first; blockIndex <= last; blockIndex++ {
+		t.picker.AbortDownload(data.NewPieceBlock(pieceIndex, blockIndex), nil)
+	}
+}
+
+// overlappingDownloadBlocks 返回与半开区间 [begin,end) 相交的下载块闭区间。
+// 末块按 piece 实际字节夹紧，不会把下一块或下一片算进去。
+func overlappingDownloadBlocks(pieceIndex int, begin, end, pieceBytes int64) (first, last int, ok bool) {
+	pieceBegin := int64(pieceIndex) * AICHPieceSize
+	relBegin := begin - pieceBegin
+	relEnd := end - pieceBegin
+	if relBegin < 0 {
+		relBegin = 0
+	}
+	if relEnd > pieceBytes {
+		relEnd = pieceBytes
+	}
+	if relEnd <= relBegin || pieceBytes <= 0 {
+		return 0, 0, false
+	}
+	first = int(relBegin / BlockSize)
+	last = int((relEnd - 1) / BlockSize)
+	maxIdx := int(DivCeil(pieceBytes, BlockSize)) - 1
+	if first < 0 {
+		first = 0
+	}
+	if last > maxIdx {
+		last = maxIdx
+	}
+	if first > last {
+		return 0, 0, false
+	}
+	return first, last, true
 }
 
 func (t *Transfer) requestAICHRecovery(pieceIndex int) {

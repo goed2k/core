@@ -345,3 +345,25 @@ func TestGapsFromResumePartialPiece(t *testing.T) {
 		t.Fatalf("unexpected gaps %+v", gaps)
 	}
 }
+
+func TestGapsFromResumeLastBlockOfFullPieceDoesNotCrossPiece(t *testing.T) {
+	t.Parallel()
+	resume := &protocol.TransferResumeData{
+		Hashes: []protocol.Hash{protocol.EMule, protocol.EMule},
+		Pieces: protocol.NewBitField(2),
+		DownloadedBlocks: []data.PieceBlock{
+			data.NewPieceBlock(0, BlocksPerPiece-1),
+		},
+	}
+	gaps := gapsFromResume(PieceSize*2, resume)
+	if len(gaps) != 2 {
+		t.Fatalf("expected 2 gaps, got %+v", gaps)
+	}
+	lastStart := uint64((BlocksPerPiece - 1) * int(BlockSize))
+	if gaps[0].Start != 0 || gaps[0].End != lastStart {
+		t.Fatalf("piece 0 prefix gap %+v", gaps[0])
+	}
+	if gaps[1].Start != uint64(PieceSize) || gaps[1].End != uint64(PieceSize*2) {
+		t.Fatalf("last 140 KiB must not eat piece 1: %+v", gaps)
+	}
+}

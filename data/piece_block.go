@@ -2,8 +2,8 @@ package data
 
 const (
 	pieceSize      int64 = 9728000
-	blockSize      int64 = 190 * 1024
-	blocksPerPiece       = int(pieceSize / blockSize)
+	blockSize      int64 = 180 * 1024
+	blocksPerPiece       = int((pieceSize + blockSize - 1) / blockSize)
 )
 
 type Range struct {
@@ -28,6 +28,12 @@ func (p PieceBlock) BlocksOffset() int64 {
 	return int64(p.PieceIndex*blocksPerPiece + p.PieceBlock)
 }
 
+// FileOffset 是块在文件中的起始字节。完整分片末块只有 140 KiB，
+// 因此不能用 BlocksOffset()*blockSize。
+func (p PieceBlock) FileOffset() int64 {
+	return int64(p.PieceIndex)*pieceSize + int64(p.PieceBlock)*blockSize
+}
+
 func MakePieceBlock(offset int64) PieceBlock {
 	piece := int(offset / pieceSize)
 	start := int(offset % pieceSize)
@@ -38,9 +44,12 @@ func MakePieceBlock(offset int64) PieceBlock {
 }
 
 func (p PieceBlock) Range(size int64) Range {
-	begin := int64(p.PieceIndex)*pieceSize + int64(p.PieceBlock)*blockSize
-	normalEnd := int64(p.PieceIndex)*pieceSize + int64(p.PieceBlock+1)*blockSize
-	end := min(begin+blockSize, min(normalEnd, size))
+	begin := p.FileOffset()
+	pieceEnd := int64(p.PieceIndex+1) * pieceSize
+	end := min(begin+blockSize, min(pieceEnd, size))
+	if end < begin {
+		end = begin
+	}
 	return MakeRange(begin, end)
 }
 

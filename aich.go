@@ -9,9 +9,11 @@ import (
 )
 
 const (
+	// AICHBlockSize 保持 untyped int，避免打散 []byte 切片运算。
+	// 与 BlockSize 同值（180 KiB）；由 TestBlockSizeMatchesAICH 锁定。
 	AICHBlockSize      = 180 * 1024
-	AICHPieceSize      = int64(9728000)
-	AICHBlocksPerPiece = 53
+	AICHPieceSize      = PieceSize
+	AICHBlocksPerPiece = BlocksPerPiece
 	AICHLastBlockSize  = AICHPieceSize - int64(AICHBlocksPerPiece-1)*AICHBlockSize
 )
 

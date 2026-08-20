@@ -232,14 +232,12 @@ func gapsFromResume(fileSize int64, resume *protocol.TransferResumeData) []proto
 			ranges = subtractGapRange(ranges, start, end)
 		}
 	}
-	blockSize := uint64(BlockSize)
 	for _, block := range resume.DownloadedBlocks {
-		start := uint64(int64(block.PieceIndex)*PieceSize + int64(block.PieceBlock)*BlockSize)
-		end := start + blockSize
-		if end > uint64(fileSize) {
-			end = uint64(fileSize)
+		r := block.Range(fileSize)
+		if r.Right <= r.Left {
+			continue
 		}
-		ranges = subtractGapRange(ranges, start, end)
+		ranges = subtractGapRange(ranges, uint64(r.Left), uint64(r.Right))
 	}
 	return mergeAdjacentGaps(ranges)
 }
@@ -314,8 +312,8 @@ func resumeFromGaps(fileSize int64, pieceHashes []protocol.Hash, gaps []protocol
 	}
 }
 
-// completedBlocksInPiece 把 eMule gap 之外、且完整覆盖本实现 BlockSize 的块记入续传。
-// 不改 180/190 KiB 常量；只承认当前 BlockSize 下整块已下载的区间，尾片短块按 PieceBlock.Range 夹紧。
+// completedBlocksInPiece 把 eMule gap 之外、且完整覆盖当前 BlockSize（180 KiB，
+// 完整分片末块 140 KiB）的块记入续传。半块与被 gap 切开的块不计入。
 func completedBlocksInPiece(fileSize int64, pieceIndex int, gaps []protocol.PartMetGap) []data.PieceBlock {
 	pieceLen := pieceByteLength(fileSize, pieceIndex)
 	if pieceLen <= 0 {

@@ -13,10 +13,12 @@ import (
 	"github.com/goed2k/core/protocol"
 )
 
-const clientStateVersion = 8
+const clientStateVersion = 9
 
 // 本仓库从未发布过独立的状态 schema 5/6（从 4 直接跳到 7）。
 // 它们与 v4–v7 同为可叠加 JSON，按当前版本兼容加载。
+// v8 及更早的 DownloadedBlocks 按 190 KiB 索引，加载时重映射到 180 KiB。
+const legacyDownloadBlockSize190 = 190 * 1024
 
 type ClientCategoryState struct {
 	Name          string `json:"name"`
@@ -414,8 +416,122 @@ func migrateClientState(state *ClientState) error {
 	if state.Version < 0 || state.Version > clientStateVersion {
 		return fmt.Errorf("unsupported state version %d (accepted 0–%d; versions 5 and 6 were never shipped as distinct schemas and migrate as v7-compatible)", state.Version, clientStateVersion)
 	}
+	if state.Version < 9 {
+		for i := range state.Transfers {
+			if state.Transfers[i].ResumeData == nil {
+				continue
+			}
+			state.Transfers[i].ResumeData.DownloadedBlocks = remapDownloadedBlocks(
+				state.Transfers[i].ResumeData.DownloadedBlocks,
+				state.Transfers[i].Size,
+				legacyDownloadBlockSize190,
+				state.Transfers[i].ResumeData.Pieces,
+			)
+		}
+	}
 	state.Version = clientStateVersion
 	return nil
+}
+
+type byteSpan struct {
+	begin int64
+	end   int64
+}
+
+// remapDownloadedBlocks 把旧块索引按字节区间并集后，只保留新粒度下被完整覆盖的块。
+// 已完成 piece 由位图单独保存，对应块索引直接丢弃。未完整覆盖的新块丢弃并重下。
+func remapDownloadedBlocks(blocks []data.PieceBlock, fileSize, fromBlockSize int64, completed protocol.BitField) []data.PieceBlock {
+	if len(blocks) == 0 || fromBlockSize <= 0 || fromBlockSize == BlockSize {
+		return blocks
+	}
+	byPiece := make(map[int][]byteSpan)
+	for _, old := range blocks {
+		if completed.GetBit(old.PieceIndex) {
+			continue
+		}
+		begin := int64(old.PieceIndex)*PieceSize + int64(old.PieceBlock)*fromBlockSize
+		end := begin + fromBlockSize
+		pieceEnd := int64(old.PieceIndex+1) * PieceSize
+		if end > pieceEnd {
+			end = pieceEnd
+		}
+		if fileSize > 0 && end > fileSize {
+			end = fileSize
+		}
+		if fileSize > 0 && begin >= fileSize {
+			continue
+		}
+		if end <= begin {
+			continue
+		}
+		byPiece[old.PieceIndex] = append(byPiece[old.PieceIndex], byteSpan{begin, end})
+	}
+	out := make([]data.PieceBlock, 0, len(blocks))
+	pieces := make([]int, 0, len(byPiece))
+	for p := range byPiece {
+		pieces = append(pieces, p)
+	}
+	sort.Ints(pieces)
+	for _, piece := range pieces {
+		if completed.GetBit(piece) {
+			continue
+		}
+		merged := mergeByteSpans(byPiece[piece])
+		count := BlocksPerPiece
+		if fileSize > 0 {
+			pieceLen := fileSize - int64(piece)*PieceSize
+			if pieceLen <= 0 {
+				continue
+			}
+			if pieceLen < PieceSize {
+				count = int(DivCeil(pieceLen, BlockSize))
+			}
+		}
+		for j := 0; j < count; j++ {
+			nb := data.NewPieceBlock(piece, j)
+			r := nb.Range(fileSize)
+			if r.Right <= r.Left {
+				continue
+			}
+			if spanFullyCovered(merged, r.Left, r.Right) {
+				out = append(out, nb)
+			}
+		}
+	}
+	return out
+}
+
+func mergeByteSpans(in []byteSpan) []byteSpan {
+	if len(in) == 0 {
+		return nil
+	}
+	sort.Slice(in, func(i, j int) bool {
+		if in[i].begin == in[j].begin {
+			return in[i].end < in[j].end
+		}
+		return in[i].begin < in[j].begin
+	})
+	out := []byteSpan{in[0]}
+	for _, s := range in[1:] {
+		last := &out[len(out)-1]
+		if s.begin <= last.end {
+			if s.end > last.end {
+				last.end = s.end
+			}
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func spanFullyCovered(spans []byteSpan, begin, end int64) bool {
+	for _, s := range spans {
+		if s.begin <= begin && s.end >= end {
+			return true
+		}
+	}
+	return false
 }
 
 func persistableSettingsFrom(s Settings) ClientSettingsState {
