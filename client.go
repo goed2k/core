@@ -591,6 +591,7 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 	}
 	handler := disk.NewDesktopFileHandler(targetPath)
 	atp := NewAddTransferParamsFromHandler(link.Hash, CurrentTimeMillis(), link.NumberValue, handler, false)
+	atp.FinalName = SanitizeDownloadFilename(link.StringValue)
 	atp.AICHRootHash = link.AICHRootHash
 	if len(link.PartHashes) > 0 {
 		atp.PieceHashes = append(atp.PieceHashes, link.PartHashes...)

@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/goed2k/core/disk"
+	"github.com/goed2k/core/protocol"
 )
 
 func TestAllocEmuleTempPartSlot(t *testing.T) {
@@ -125,6 +128,133 @@ func TestResolveEmuleDownloadPathKeepsUnixReservedName(t *testing.T) {
 	cleanup()
 	if filepath.Base(path) != "CON" {
 		t.Fatalf("unix legal reserved-looking name changed: %s", path)
+	}
+}
+
+func TestPromoteEmulePartFileRenamesToFinalName(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "001.part")
+	if err := os.WriteFile(src, []byte("hello-part"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src+".met", []byte("met"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest, err := promoteEmulePartFile(src, dir, "movie.avi", int64(len("hello-part")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(dest) != "movie.avi" {
+		t.Fatalf("dest %s", dest)
+	}
+	raw, err := os.ReadFile(dest)
+	if err != nil || string(raw) != "hello-part" {
+		t.Fatalf("data %q err=%v", raw, err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("temp part should be gone")
+	}
+	if _, err := os.Stat(src + ".met"); !os.IsNotExist(err) {
+		t.Fatal("sidecar should be gone")
+	}
+}
+
+func TestPromoteEmulePartFileIncomingDirAndCollision(t *testing.T) {
+	tempDir := t.TempDir()
+	incoming := t.TempDir()
+	src := filepath.Join(tempDir, "002.part")
+	if err := os.WriteFile(src, []byte("payload-ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exist := filepath.Join(incoming, "clip.bin")
+	if err := os.WriteFile(exist, []byte("other"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest, err := promoteEmulePartFile(src, incoming, "clip.bin", int64(len("payload-ok")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(dest) != "clip (1).bin" {
+		t.Fatalf("collision dest %s", dest)
+	}
+	raw, err := os.ReadFile(dest)
+	if err != nil || string(raw) != "payload-ok" {
+		t.Fatalf("moved data %q", raw)
+	}
+}
+
+func TestPromoteEmulePartFileCrashRetrySameSize(t *testing.T) {
+	tempDir := t.TempDir()
+	incoming := t.TempDir()
+	src := filepath.Join(tempDir, "003.part")
+	if err := os.WriteFile(src, []byte("same-size"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(incoming, "done.bin")
+	if err := os.WriteFile(dest, []byte("same-size"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := promoteEmulePartFile(src, incoming, "done.bin", int64(len("same-size")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dest {
+		t.Fatalf("retry dest %s", got)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("stale part should be removed")
+	}
+}
+
+func TestPromoteEmulePartFileRejectsUnsafeName(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "004.part")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest, err := promoteEmulePartFile(src, dir, "../escape.bin", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(dest) != dir || filepath.Base(dest) != "escape.bin" {
+		t.Fatalf("escaped dest %s", dest)
+	}
+}
+
+func TestFinishedPromotesEmuleTempPart(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "001.part")
+	payload := []byte("tiny-complete")
+	if err := os.WriteFile(src, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := NewSettings()
+	settings.UseEmuleTempLayout = true
+	settings.ListenPort = 0
+	session := NewSession(settings)
+	handle, err := session.AddTransferParams(AddTransferParams{
+		Hash:       protocol.EMule,
+		CreateTime: CurrentTimeMillis(),
+		Size:       int64(len(payload)),
+		FilePath:   src,
+		FinalName:  "tiny.bin",
+		Handler:    disk.NewDesktopFileHandler(src),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerTransferFileCleanup(t, handle)
+	handle.transfer.picker.WeHave(0)
+	handle.transfer.finished()
+	if filepath.Base(handle.GetFilePath()) != "tiny.bin" {
+		t.Fatalf("path %s", handle.GetFilePath())
+	}
+	if handle.transfer.FileName() != "tiny.bin" {
+		t.Fatalf("name %s", handle.transfer.FileName())
+	}
+	raw, err := os.ReadFile(handle.GetFilePath())
+	if err != nil || string(raw) != string(payload) {
+		t.Fatalf("promoted data %q err=%v", raw, err)
 	}
 }
 
