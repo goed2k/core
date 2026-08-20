@@ -296,6 +296,16 @@ func (s *Session) GetUDPPort() int {
 	return s.settings.UDPPort
 }
 
+func (s *Session) loginRequestOptions() serverproto.LoginRequestOptions {
+	if s == nil {
+		return serverproto.LoginRequestOptions{}
+	}
+	return serverproto.LoginRequestOptions{
+		EnableCryptLayer:   s.settings.EnableCryptLayer,
+		CryptLayerRequired: s.settings.CryptLayerRequired,
+	}
+}
+
 func (s *Session) GetClientName() string {
 	return s.settings.ClientName
 }
