@@ -439,13 +439,16 @@ type byteSpan struct {
 }
 
 // remapDownloadedBlocks 把旧块索引按字节区间并集后，只保留新粒度下被完整覆盖的块。
-// 已完成 piece 由位图单独保存，不在此改写。未完整覆盖的新块丢弃并重下。
-func remapDownloadedBlocks(blocks []data.PieceBlock, fileSize, fromBlockSize int64) []data.PieceBlock {
+// 已完成 piece 由位图单独保存，对应块索引直接丢弃。未完整覆盖的新块丢弃并重下。
+func remapDownloadedBlocks(blocks []data.PieceBlock, fileSize, fromBlockSize int64, completed protocol.BitField) []data.PieceBlock {
 	if len(blocks) == 0 || fromBlockSize <= 0 || fromBlockSize == BlockSize {
 		return blocks
 	}
 	byPiece := make(map[int][]byteSpan)
 	for _, old := range blocks {
+		if completed.GetBit(old.PieceIndex) {
+			continue
+		}
 		begin := int64(old.PieceIndex)*PieceSize + int64(old.PieceBlock)*fromBlockSize
 		end := begin + fromBlockSize
 		pieceEnd := int64(old.PieceIndex+1) * PieceSize
@@ -470,6 +473,9 @@ func remapDownloadedBlocks(blocks []data.PieceBlock, fileSize, fromBlockSize int
 	}
 	sort.Ints(pieces)
 	for _, piece := range pieces {
+		if completed.GetBit(piece) {
+			continue
+		}
 		merged := mergeByteSpans(byPiece[piece])
 		count := BlocksPerPiece
 		if fileSize > 0 {
