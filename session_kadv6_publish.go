@@ -86,7 +86,9 @@ func (s *Session) publishSingleTransferKADV6(tracker *KADV6Tracker, tcpAddr *net
 		return
 	}
 	hash := t.GetHash()
-	if !tracker.PublishSource(hash, tcpAddr, t.Size()) {
+	if clientID := s.GetClientID(); clientID != 0 && IsLowID(clientID) {
+		logx.Debug("kadv6 publish source skipped: local lowid", "hash", hash.String())
+	} else if !tracker.PublishSource(hash, tcpAddr, t.Size()) {
 		logx.Debug("kadv6 publish source skipped or failed", "hash", hash.String())
 	}
 	keyword := pickKadKeyword(t.FileName())
@@ -134,7 +136,9 @@ func (s *Session) publishSingleSharedFileKADV6(tracker *KADV6Tracker, tcpAddr *n
 		return
 	}
 	hash := sf.Hash
-	if !tracker.PublishSource(hash, tcpAddr, sf.Size()) {
+	if clientID := s.GetClientID(); clientID != 0 && IsLowID(clientID) {
+		logx.Debug("kadv6 publish source skipped: local lowid", "hash", hash.String())
+	} else if !tracker.PublishSource(hash, tcpAddr, sf.Size()) {
 		logx.Debug("kadv6 publish source skipped or failed", "hash", hash.String())
 	}
 	keyword := pickKadKeyword(sf.FileLabel())

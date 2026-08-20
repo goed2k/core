@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `df080c4`（2026-08-20 审查，含下载侧 TCP QueueRanking/重询）。
+- **基线**：`main` 分支提交 `9af5f8b`（2026-08-20 审查，含标准客户端 UDP ReAsk 基础格式）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -27,7 +27,7 @@
 | 文件完整性与续传 | ED2K 分片哈希、AICH 局部恢复、goed2k state、二进制及 JSON `.part.met` 读写已存在 | `transfer.go`、`aich.go`、`client_state.go`、`part_met.go`、`protocol/emule_partmet.go` |
 | 安全与连接 | CryptLayer、SecIdent、IP 过滤及封禁已有实现和本地测试 | `protocol_obfuscation.go`、`secure_ident.go`、`ipfilter.go`、`ban_peer.go` |
 
-上述“已存在”只说明代码路径可用。尤其是队列、UDP ReAsk、MultiPacket、LowID Kad 来源和跨平台文件行为，不能从本地回环测试推导为真实客户端兼容。
+上述“已存在”只说明代码路径可用。尤其是上传队列身份、UDPVer 2+、MultiPacket、Kad Buddy/Kad2 和跨平台文件行为，不能从本地回环测试推导为真实客户端兼容。
 
 ## 3. P0：主要互操作闭环
 
@@ -36,7 +36,7 @@
 | **下载侧 TCP QueueRanking/重询语义已覆盖；上传侧跨连接排队身份仍未完成** | 下载侧会把远端 rank、排队状态和下一次重询期限保存在逻辑 `Peer` 中；收到 `QueueRanking` 后允许关闭 TCP，但 `Policy` 不增加 `FailCount`，并按 eMule `FILEREASKTIME`（29 分钟）阻止提前重连；同一来源重询会更新 rank，`AcceptUpload` 或实际下载开始会清理状态。上传侧 `upload_queue.go` 的等待项仍是 `[]*PeerConnection`，断开会删除等待项，rank 与等待起点仍绑定连接。 | 下载侧正常排队不再被误记为坏来源，也不会因 TCP 关闭立即重连；但本客户端作为上传方时，仍不能让远端在 TCP 重连后凭稳定身份延续等待时间。**TCP 断开本身不是缺陷，逻辑队列状态与按期重询才是兼容重点。** | 高 | 已有可控时钟状态机测试覆盖 QueueRanking→断开→到期重询→AcceptUpload/下载及普通错误回归；仍需 eMule/aMule 长队列抓包联调。上传侧后续以 UserHash/文件 hash 等稳定键覆盖超时、取消和重复连接。 |
 | **客户端 UDP ReAsk 基础格式已覆盖；UDPVer 2+ 扩展仍未完成** | `client_udp.go` 使用 `OP_EMULEPROT`（0xC5）编解码标准 `OP_REASKFILEPING`（hash 16）、`OP_REASKACK`（rank 2）、`OP_FILENOTFOUND`、`OP_QUEUEFULL`。Hello 宣告 `UDPVer=1` 与 `CT_EMULE_UDPPORTS`，不宣告 part status / complete source count。下载侧到期排队来源在已知 UDP 端口时优先 UDP ReAsk，TCP 回退；ACK 更新 rank 并推迟重询，QueueFull/FileNotFound 不增加 `FailCount`。上传侧仅能匹配当前仍在 `UploadQueue` 中的 `*PeerConnection`。旧 6 字节 0xE3 探测已拒绝。 | 与 eMule 基础 ReAsk 互问互答已具备线格式与状态接入；TCP 断开后上传队列身份仍丢失，因此对端重连后的 UDP Ping 可能只能收到 QueueFull 或沉默（迫使 TCP）。不处理 `OP_PACKEDPROT` 压缩客户端 UDP。 | 高 | 已有 golden bytes、短包/旧探测拒绝、下载侧 ACK/QueueFull/FileNotFound 与上传侧匹配/未知文件测试。UDPVer>3 的 part status、complete source count、跨连接上传身份和 Kad LowID 回调仍是后续独立 PR。 |
 | **普通块边界为 190 KiB，与主流 180 KiB 不一致** | `constants.go` 的 `BlockSize=190*1024`，`data/peer_request.go` 的 `prBlockSize` 同为 190 KiB；该值进入 picker、磁盘偏移、请求、接收、HTTP Range、`.part.met` gap 和 AICH 重置映射。`aich.go` 的 `AICHBlockSize=180*1024`。 | 边界差异可能影响与标准 BLOCKSIZE/EMBLOCKSIZE=180 KiB 的请求切分、断点区间和 AICH 坏块映射。现阶段证据不足，**不得直接断言一定导致数据损坏**。 | 高 | 先列出全链路边界清单，再用非整块尾部、跨块压缩包、64 位偏移、断点导入和 AICH 恢复做表驱动测试；加入 eMule/aMule 请求区间抓包对照后再改常量。 |
-| **Kad LowID 来源消费丢失语义，发布固定 HighID 类型** | `protocol/kad/types.go:SourceEndpoint` 接受多种 `SourceType`，但只返回 IP/端口；`session.go:SendDHTSourcesRequest` 随后直接 `AddPeer(endpoint, PeerDHT)`，没有保留 LowID、服务器、Buddy/回调标签。`dht_tracker.go:PublishSource` 将 `TagSourceType` 固定为 `1`。 | LowID 搜源结果可能被当作可直连 HighID，导致无效拨号；本机为 LowID 时仍发布 HighID 语义，其他客户端难以回调。 | 中高 | 为各 SourceType 建立结构化解析测试；HighID 走直连，LowID 保留 server/buddy/callback 元数据并进入对应策略；发布端按实际可达性输出标签。使用真实 LowID 节点联调。 |
+| **Kad LowID 消费/发布已覆盖服务器回调路径；Buddy 隧道与 KADV6 LowID 标签仍待后续** | `protocol/kad/types.go:SourceInfo` 按 eMule `TAG_SOURCETYPE` 区分 HighID（1/4）与 LowID（2/3 或仅 client ID）。`session.mergeKadSearchSources` 对 HighID `AddPeer` 直连，对 LowID 写入 `ServerClientID` 并复用 `Policy.ConnectOnePeer` → `RequestServerCallback`。`PublishSource` 按 `session.clientID`/`IsLowID` 发布 SourceType=1 或 2（LowID 带 `TagClientLowID`，不再固定宣称 HighID）。KADV6 仍拒绝 SourceType=2/3 直连，且本机 LowID 时跳过 IPv6 源发布，不实现 client ID 标签。未实现 FindBuddy TCP 隧道、Kad2、KAD↔KADV6 桥接。 | Kad4 LowID 来源不再被当成假 IP 拨号；本机 LowID 发布可被其他客户端识别为需回调。没有 Buddy 时，双方都是 LowID 或未连服务器仍无法互连。KADV6 LowID 只是不再谎报 HighID。 | 中 | 已有假 tracker/entry 测试：HighID 直连、LowID/type2/type3/仅 client ID 进回调、不可用 type2 不入表、HighID/LowID 发布标签与共存索引。仍需真实 LowID 节点与 eMule/aMule 联调；Buddy/Kad2/KADV6 LowID 标签为后续独立 PR。 |
 | **Hello/MiscOptions 能力声明与处理能力不一致** | `peer_connection.go:PrepareHelloAnswer` 现已宣告大文件、SX2 与 `UDPVer=1`（标准 ReAsk 基础格式），并写入 `CT_EMULE_UDPPORTS`。`SupportsPreview`、`MultiPacket` 与 Captcha 仍未声明。`SupportLargeFiles()` 已按位读取。 | 对端可据此发送基础 UDP ReAsk；高 UDPVer 扩展、Preview 与 MultiPacket 仍不应出现。 | 中 | 能力位 golden test 已覆盖已实现位；Preview/MultiPacket 仅在各自闭环后声明。 |
 
 ## 4. P1：可靠性、迁移与平台一致性
@@ -70,8 +70,8 @@
 3. **跨连接上传队列身份（未完成）**：引入稳定队列键和等待记录，使本客户端作为上传方时，TCP 断开不等于删除远端请求方的排队身份；只改上传队列模型与测试。标准 UDP ReAsk 已可在连接仍存活时刷新 last asked，但不能弥补该缺口。
 4. **UDP ReAsk 线协议（基础格式已覆盖）**：已独立实现标准 OP_REASKFILEPING、ACK rank、FileNotFound、QueueFull 编解码，并接入下载侧远端队列重询；Hello 仅宣告 UDPVer=1。后续独立 PR 再做 UDPVer 2+ 扩展，不得与上传队列持久化或 Kad LowID 混在同一 PR。
 5. **180 KiB 边界审计与迁移**：先提交边界清单/测试，再在单独 PR 改全链路常量；如证据否定变更则关闭实现 PR 并更新本文。
-6. **Kad LowID 消费链路**：保留 SourceType、服务器/Buddy/回调语义并更新策略。
-7. **Kad 发布类型**：根据实际 HighID/LowID 和可达性生成来源标签，与第 6 步分开验证。
+6. **Kad LowID 消费链路（已覆盖服务器回调）**：`SourceInfo` 保留 SourceType；HighID 直连，LowID 进入既有 `RequestServerCallback`/`Policy` 路径。Buddy 隧道仍属第 16 项。
+7. **Kad 发布类型（已覆盖 Kad4）**：根据 `clientID`/`IsLowID` 生成 SourceType=1/2 与 client ID 标签。KADV6 LowID 仅跳过 HighID 源发布，完整 IPv6 LowID 标签待后续。
 8. **Server Login 扩展标签**：补齐 UDP/混淆端口及条件能力标签。
 9. **`.part.met` 精确导入**：先保留部分 piece 区间；不同时引入自动写入。
 10. **`.part.met` 自动维护**：在已验证精确模型上增加节流、原子写和崩溃恢复。

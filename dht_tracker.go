@@ -3,6 +3,7 @@ package goed2k
 import (
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -508,12 +509,8 @@ func (t *DHTTracker) PublishSource(hash protocol.Hash, endpoint protocol.Endpoin
 		return false
 	}
 	entry := kadproto.SearchEntry{
-		ID: kadproto.NewID(hash),
-		Tags: []kadproto.Tag{
-			{Type: kadproto.TagTypeUint8, ID: kadproto.TagSourceType, UInt64: 1},
-			{Type: kadproto.TagTypeUint32, ID: kadproto.TagSourceIP, UInt64: uint64(uint32(endpoint.IP()))},
-			{Type: kadproto.TagTypeUint16, ID: kadproto.TagSourcePort, UInt64: uint64(uint16(endpoint.Port()))},
-		},
+		ID:   kadproto.NewID(hash),
+		Tags: kadPublishSourceTags(endpoint),
 	}
 	if size > 0 {
 		entry.Tags = append(entry.Tags, kadproto.Tag{Type: kadproto.TagTypeUint64, ID: 0xD3, UInt64: uint64(size)})
@@ -851,11 +848,7 @@ func (t *DHTTracker) storeSourceLocked(hash protocol.Hash, entry kadproto.Search
 		bucket = make(map[string]kadproto.SearchEntry)
 		t.sourceIndex[key] = bucket
 	}
-	entryKey := entry.ID.Hash.String()
-	if endpoint, ok := entry.SourceEndpoint(); ok && endpoint.Defined() {
-		entryKey = endpoint.String()
-	}
-	bucket[entryKey] = entry
+	bucket[kadSourceIndexKey(entry)] = entry
 }
 
 func (t *DHTTracker) storeKeywordLocked(hash protocol.Hash, entry kadproto.SearchEntry) {
@@ -1058,4 +1051,32 @@ func (t *DHTTracker) addSourceIPLocked(entry *kadproto.SearchEntry, addr *net.UD
 		}
 	}
 	entry.Tags = append([]kadproto.Tag{{Type: kadproto.TagTypeUint32, ID: kadproto.TagSourceIP, UInt64: uint64(protocolIP(addr.IP))}}, entry.Tags...)
+}
+
+func kadPublishSourceTags(endpoint protocol.Endpoint) []kadproto.Tag {
+	sourceType := kadproto.SourceTypeHighID
+	ip := uint64(uint32(endpoint.IP()))
+	if IsLowID(endpoint.IP()) {
+		sourceType = kadproto.SourceTypeLowID
+	}
+	tags := []kadproto.Tag{
+		{Type: kadproto.TagTypeUint8, ID: kadproto.TagSourceType, UInt64: sourceType},
+		{Type: kadproto.TagTypeUint32, ID: kadproto.TagSourceIP, UInt64: ip},
+		{Type: kadproto.TagTypeUint16, ID: kadproto.TagSourcePort, UInt64: uint64(uint16(endpoint.Port()))},
+	}
+	if sourceType == kadproto.SourceTypeLowID {
+		tags = append(tags, kadproto.Tag{Type: kadproto.TagTypeUint32, ID: kadproto.TagClientLowID, UInt64: ip})
+	}
+	return tags
+}
+
+func kadSourceIndexKey(entry kadproto.SearchEntry) string {
+	info, ok := entry.SourceInfo()
+	if ok && info.Kind == kadproto.SourceKindDirect && info.Endpoint.Defined() {
+		return info.Endpoint.String()
+	}
+	if ok && info.Kind == kadproto.SourceKindCallback && info.ClientID != 0 {
+		return "low:" + strconv.FormatInt(int64(info.ClientID), 10)
+	}
+	return entry.ID.Hash.String()
 }

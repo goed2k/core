@@ -43,21 +43,141 @@ func TestSearchEntryExtractsSourceEndpoint(t *testing.T) {
 	}
 }
 
-func TestSearchEntryExtractsLowIDSourceEndpoint(t *testing.T) {
-	// eMule 常见：SourceType=2（LowID），此前被错误拒绝导致 Kad 来源数为 0
+func TestSearchEntryExtractsLowIDSourceInfo(t *testing.T) {
 	entry := SearchEntry{
 		Tags: []Tag{
-			{ID: TagSourceType, UInt64: 2},
-			{ID: TagSourceIP, UInt64: uint64(uint32(0x0100007f))},
+			{ID: TagSourceType, UInt64: SourceTypeLowID},
+			{ID: TagSourceIP, UInt64: 12345},
 			{ID: TagSourcePort, UInt64: 4662},
 		},
 	}
-	endpoint, ok := entry.SourceEndpoint()
-	if !ok {
-		t.Fatal("expected low-id source endpoint")
+	if _, ok := entry.SourceEndpoint(); ok {
+		t.Fatal("LowID 条目不得作为可拨号 SourceEndpoint")
 	}
-	if endpoint.Port() != 4662 {
-		t.Fatalf("unexpected port %d", endpoint.Port())
+	info, ok := entry.SourceInfo()
+	if !ok {
+		t.Fatal("expected low-id source info")
+	}
+	if info.Kind != SourceKindCallback || info.ClientID != 12345 {
+		t.Fatalf("unexpected source info %#v", info)
+	}
+}
+
+func TestSearchEntrySourceInfoKinds(t *testing.T) {
+	highIP := uint64(uint32(0x0100007f))
+	tests := []struct {
+		name       string
+		tags       []Tag
+		wantOK     bool
+		wantKind   SourceKind
+		wantClient int32
+		wantDirect bool
+	}{
+		{
+			name: "highid type1",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: SourceTypeHighID},
+				{ID: TagSourceIP, UInt64: highIP},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+			wantOK: true, wantKind: SourceKindDirect, wantDirect: true,
+		},
+		{
+			name: "highid type4 crypt",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: SourceTypeHighIDCrypt},
+				{ID: TagSourceIP, UInt64: highIP},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+			wantOK: true, wantKind: SourceKindDirect, wantDirect: true,
+		},
+		{
+			name: "lowid type2 client id in source ip",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: SourceTypeLowID},
+				{ID: TagSourceIP, UInt64: 4242},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+			wantOK: true, wantKind: SourceKindCallback, wantClient: 4242,
+		},
+		{
+			name: "firewalled type3 uses clientlowid",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: SourceTypeFirewalled},
+				{ID: TagSourceIP, UInt64: highIP},
+				{ID: TagSourcePort, UInt64: 4662},
+				{ID: TagClientLowID, UInt64: 777},
+			},
+			wantOK: true, wantKind: SourceKindCallback, wantClient: 777,
+		},
+		{
+			name: "type2 highip without client id is not dialable",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: SourceTypeLowID},
+				{ID: TagSourceIP, UInt64: highIP},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+		},
+		{
+			name: "only client id",
+			tags: []Tag{
+				{ID: TagClientLowID, UInt64: 999},
+			},
+			wantOK: true, wantKind: SourceKindCallback, wantClient: 999,
+		},
+		{
+			name: "type1 with lowid ip is callback",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: SourceTypeHighID},
+				{ID: TagSourceIP, UInt64: 12345},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+			wantOK: true, wantKind: SourceKindCallback, wantClient: 12345,
+		},
+		{
+			name: "unknown type5 with highip is rejected",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: 5},
+				{ID: TagSourceIP, UInt64: highIP},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+		},
+		{
+			name: "invalid type above 0x20",
+			tags: []Tag{
+				{ID: TagSourceType, UInt64: 0x21},
+				{ID: TagSourceIP, UInt64: highIP},
+				{ID: TagSourcePort, UInt64: 4662},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := SearchEntry{Tags: tc.tags}
+			info, ok := entry.SourceInfo()
+			if ok != tc.wantOK {
+				t.Fatalf("SourceInfo ok=%v want %v info=%#v", ok, tc.wantOK, info)
+			}
+			if !tc.wantOK {
+				if _, epOK := entry.SourceEndpoint(); epOK {
+					t.Fatal("rejected entry must not expose SourceEndpoint")
+				}
+				return
+			}
+			if info.Kind != tc.wantKind {
+				t.Fatalf("kind=%d want %d", info.Kind, tc.wantKind)
+			}
+			if info.ClientID != tc.wantClient {
+				t.Fatalf("clientID=%d want %d", info.ClientID, tc.wantClient)
+			}
+			endpoint, epOK := entry.SourceEndpoint()
+			if epOK != tc.wantDirect {
+				t.Fatalf("SourceEndpoint ok=%v want %v", epOK, tc.wantDirect)
+			}
+			if tc.wantDirect && !endpoint.Defined() {
+				t.Fatal("direct source must have defined endpoint")
+			}
+		})
 	}
 }
 

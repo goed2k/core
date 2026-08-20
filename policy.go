@@ -214,8 +214,8 @@ func (p *Policy) ConnectOnePeer(sessionTime int64) (bool, error) {
 	if peerInfo == nil {
 		return false, nil
 	}
-	if peerInfo.ServerClientID != 0 && p.transfer != nil && p.transfer.session != nil {
-		if !IsLowID(p.transfer.session.GetClientID()) {
+	if peerInfo.ServerClientID != 0 {
+		if p.transfer != nil && p.transfer.session != nil && !IsLowID(p.transfer.session.GetClientID()) {
 			if p.transfer.session.RequestServerCallback(p.transfer, peerInfo.ServerClientID) {
 				peerInfo.LastConnected = sessionTime
 				if _, queued := peerInfo.RemoteQueueState(); queued {
@@ -223,8 +223,9 @@ func (p *Policy) ConnectOnePeer(sessionTime int64) (bool, error) {
 				}
 				return true, nil
 			}
-			return false, nil
 		}
+		peerInfo.LastConnected = sessionTime
+		return false, nil
 	}
 	if _, queued := peerInfo.RemoteQueueState(); queued && !peerInfo.udpReaskPending && p.transfer != nil && p.transfer.session != nil {
 		if p.transfer.session.tryUDPReaskQueuedPeer(p.transfer, peerInfo, sessionTime) {

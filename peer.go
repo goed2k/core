@@ -23,7 +23,7 @@ type Peer struct {
 	udpReaskPending bool
 	// UDPPort 来自 Hello CT_EMULE_UDPPORTS（0xF9）低 16 位，供标准 UDP ReAsk 使用。
 	UDPPort uint16
-	// ServerClientID 非零表示服务器来源的低 ID 用户 ID（Endpoint 的 IP 字段实为 client ID）。
+	// ServerClientID 非零表示低 ID 用户 ID，来自服务器 FoundSources 或 Kad LowID 搜源；此时 Endpoint 为空，只能走回调。
 	ServerClientID int32
 	// DialAddr 可选；非 nil 时优先用于 TCP 拨号（如 KADV6 纯 IPv6 来源），与 Endpoint 可并存（IPv4 时常同步）。
 	DialAddr *net.TCPAddr
