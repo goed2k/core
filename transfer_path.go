@@ -33,8 +33,10 @@ func AllocEmuleTempPartSlot(tempDir string) (slot int, partPath string, err erro
 }
 
 // ResolveEmuleDownloadPath 根据设置决定下载数据文件路径。
-// UseEmuleTempLayout 为 true 时使用 NNN.part；否则为 outDir/filename。
+// UseEmuleTempLayout 为 true 时使用 NNN.part；否则为 outDir/清洗后的 filename。
+// ED2K 链接文件名在 filepath.Join 之前经过 SanitizeDownloadFilename。
 func ResolveEmuleDownloadPath(settings Settings, outDir, filename string) (path string, cleanup func(), err error) {
+	filename = SanitizeDownloadFilename(filename)
 	if !settings.UseEmuleTempLayout {
 		return filepath.Join(outDir, filename), func() {}, nil
 	}

@@ -17,7 +17,7 @@ import "github.com/goed2k/core"
 | `Client` | 高层入口：监听、连接服务器、任务、DHT、搜索、状态持久化、事件订阅。 |
 | `Session` | 会话与传输内核；多数场景通过 `client.Session()` 访问配置与底层能力。 |
 | `TransferHandle` | 单个下载任务的句柄；由 `AddLink` / `AddTransfer` / `FindTransfer` 等返回。 |
-| `Settings` / `NewSettings` | 监听端口、客户端标识、连接与队列限制等；`NewClient(settings)` 前配置。 |
+| `Settings` / `NewSettings` | 监听端口、客户端标识、连接与队列限制等；`NewClient(settings)` 前配置。`PreallocateDiskSpace` / `UseSparseFiles` 的真实效果见 `disk.PreallocateSemantics()`，非 Linux/Windows 仅 Truncate。 |
 
 ## 推荐生命周期
 
@@ -59,7 +59,7 @@ import "github.com/goed2k/core"
 
 | 方法 | 作用 |
 |------|------|
-| `AddLink(linkValue, outputDir string) (TransferHandle, string, error)` | 解析 `ed2k://` 等链接并创建任务。 |
+| `AddLink(linkValue, outputDir string) (TransferHandle, string, error)` | 解析 `ed2k://` 等链接并创建任务。链接文件名经 `SanitizeDownloadFilename` 后再 `filepath.Join`：始终去掉路径穿越；Windows 另清洗非法字符与保留名。 |
 | `AddTransfer(AddTransferParams) (TransferHandle, error)` | 以参数结构体添加任务（哈希、大小、路径等）。 |
 | `FindTransfer(hash) TransferHandle` | 按文件哈希查找句柄（无效时 `IsValid()==false`）。 |
 | `Transfers() []TransferHandle` | 当前所有任务句柄。 |

@@ -3,6 +3,7 @@ package goed2k
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -50,5 +51,94 @@ func TestResolveEmuleDownloadPathTempLayout(t *testing.T) {
 	defer cleanup()
 	if filepath.Base(path) != "001.part" {
 		t.Fatalf("expected 001.part, got %s", path)
+	}
+}
+
+func TestResolveEmuleDownloadPathTempLayoutIgnoresUnsafeName(t *testing.T) {
+	dir := t.TempDir()
+	st := NewSettings()
+	st.UseEmuleTempLayout = true
+	path, cleanup, err := ResolveEmuleDownloadPath(st, dir, `../CON:evil<>.txt`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if filepath.Base(path) != "001.part" {
+		t.Fatalf("temp layout should keep NNN.part, got %s", path)
+	}
+}
+
+func TestResolveEmuleDownloadPathSeparatorOnlyName(t *testing.T) {
+	dir := t.TempDir()
+	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	if path == dir || filepath.Dir(path) != dir {
+		t.Fatalf("separator-only name must stay inside outDir as a file, got %s", path)
+	}
+	if filepath.Base(path) != "_" {
+		t.Fatalf("expected placeholder _, got %s", path)
+	}
+}
+
+func TestResolveEmuleDownloadPathSanitizesTraversal(t *testing.T) {
+	dir := t.TempDir()
+	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "../etc/passwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	if filepath.Dir(path) != dir {
+		t.Fatalf("escaped output dir: %s", path)
+	}
+	if filepath.Base(path) != "passwd" {
+		t.Fatalf("unexpected base %s", path)
+	}
+}
+
+func TestResolveEmuleDownloadPathSanitizesWindowsReservedWhenOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("保留名清洗只在 Windows 上生效")
+	}
+	dir := t.TempDir()
+	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "CON.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	if filepath.Base(path) != "CON_.txt" {
+		t.Fatalf("expected CON_.txt, got %s", path)
+	}
+}
+
+func TestResolveEmuleDownloadPathKeepsUnixReservedName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CON 作为普通名仅在非 Windows 上保留")
+	}
+	dir := t.TempDir()
+	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "CON")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	if filepath.Base(path) != "CON" {
+		t.Fatalf("unix legal reserved-looking name changed: %s", path)
+	}
+}
+
+func TestResolveEmuleDownloadPathKeepsUnixColon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix 合法冒号仅在非 Windows 上保留")
+	}
+	dir := t.TempDir()
+	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "foo:bar.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	if filepath.Base(path) != "foo:bar.bin" {
+		t.Fatalf("unix legal name changed: %s", path)
 	}
 }

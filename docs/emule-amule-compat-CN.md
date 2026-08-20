@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `2e1d9c9`（2026-08-20 审查，含 `.part.met` 精确导入与 AICH 根哈希主动请求）。
+- **基线**：`main` 分支提交 `51603f5`（2026-08-20 审查，含 `.part.met` 节流原子写出、精确导入与 AICH 根哈希主动请求）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -47,7 +47,7 @@
 | **`.part.met` 精确导入与运行时自动写出已覆盖** | `resumeFromGaps` 对无 gap 的 piece 置位，并对有 gap 的 piece 把当前 `BlockSize`（190 KiB）下整块已下载区间写入 `DownloadedBlocks`。`Client` 在创建任务、节流周期和 `Stop` 时原子写出 `.part.met`；`writePartMetAtomic` 先写 `.tmp` 再替换，导入前 `recoverPartMetSidecar` 提升合法 tmp、删除损坏 tmp，不覆盖已有合法文件。日常 `client_state.go` 仍保存自身状态。未改 180 KiB 常量。 | 交叉接管保留整块进度；异常退出后仍可用旁注 `.part.met` 恢复到最近一次节流写出。小于 `BlockSize` 的尾部仍可能丢失。 | 中高 | 已有多 gap、半块拒绝、尾片短块、空/全文件 gap、eMule 二进制部分 gap 导入、损坏/未知格式拒绝、导出再导入保留块、完成量统计、导入块不与原 gap 重叠，以及原子替换、tmp 提升/丢弃、节流跳过、Stop 强制写出测试。 |
 | **AICH 根哈希主动请求已覆盖；MultiPacket 捆绑与真实联调仍待后续** | 收到匹配的 `FileStatusAnswer`/`HashSetAnswer` 后，若对端 Hello `AICHVersion!=0` 且任务尚无根，连接会发送一次 `OP_AICHFILEHASHREQ`（0x9E）。`AICHFileHashAnswer` 拒绝文件 hash 不匹配、零根和冲突根，只接受首次合法根；`SetAICHRootHash` 不覆盖已有根。缺根时坏片仍整片重下，同时向 AICH 来源补请求根，避免无应答时永久挂起。根到达后对已挂起的块哈希请求按连接串行派出（每个连接同时只挂一个 `pendingAICHPiece`）。不把根请求塞进 MultiPacket。 | 链接或状态未带 AICH 根时，可在握手阶段补齐根；之后坏片才能走 AICH 局部恢复。根未到之前的坏片回落整片重下。对端不回答则该连接不再重试根请求，其他 AICH 来源仍可请求。 | 中 | 已有状态机测试：缺根 FileStatus 请求一次、无 AICH/已有根/hash 不匹配不请求、应答保存/拒绝/冲突、根到达后补块哈希、缺根坏片不挂起、忙连接不覆盖分片索引。仍需真实 eMule/aMule 联调；MultiPacket 内嵌根请求属独立项。 |
 | **MultiPacket EXT2 线格式未经真实协议证明** | `protocol/client/multipacket.go` 将完整已编码帧整体 zlib 压缩；测试只做本实现 Pack/Unpack 自洽。`peer_connection_p1.go:tryCoalesceOutgoingMultiPacket` 为空，出站禁用。 | 本地往返通过不能证明符合 eMule 线格式；贸然开启可能导致解包失败、连接中断或与 CryptLayer 时序冲突。 | 高 | 先收集 eMule/aMule golden 抓包和源码定义，建立单向 fixture 测试，不能只做自身 round-trip；分别覆盖明文、CryptLayer、半包、尾随帧和未知子包，再决定是否启用出站。 |
-| **Windows/macOS 稀疏、预分配和 Windows 文件名规则缺口** | `disk/preallocate_linux.go` 仅 Linux 使用 `fallocate`；`disk/preallocate_stub.go` 在所有非 Linux 平台静默成功但不执行真实预分配/稀疏标记。`transfer_path.go` 和 `client.go:AddLink` 直接以远端文件名 `filepath.Join`，未见 Windows 保留名、非法字符和尾随点空格清洗。 | 配置显示成功但磁盘策略未生效；恶意或不合法 ED2K 文件名可能创建失败、路径行为不一致或任务无法恢复。 | 中高 | Windows 使用系统稀疏/分配 API、macOS 使用可证明的预分配路径；分别检查实际分配块数。为 `CON`、`NUL`、冒号、反斜杠、尾随点空格、重复名和超长名建立跨平台测试。 |
+| **Windows 文件名清洗与跨平台预分配语义已覆盖；macOS 仍仅 Truncate** | `SanitizeDownloadFilename` 在 `filepath.Join` 前去掉穿越与 `..`；仅 Windows 替换 `<>:"|?*`、控制字符、保留设备名和尾随点/空格，Unix 合法名（如冒号）不改。`disk.PreallocateSemantics` 明确三类能力：Linux `fallocate`、Windows NTFS `FSCTL_SET_SPARSE`/`FileAllocationInfo`、其余平台仅 Truncate 且不保证稀疏/占盘。`UseSparseFiles` 优先于 `PreallocateDiskSpace`。未实现 macOS `F_PREALLOCATE`。 | Windows 上非法/保留名可落盘；Settings 不再假装非 Linux 已 fallocate。macOS 仍只扩逻辑大小。清洗后不同非法名可能映射到同一文件名。 | 中 | 已有表驱动映射、保留名、穿越、超长截断、Unix 不改合法名，以及 Windows 稀疏属性/分配簇、Linux `st_blocks` 测试；均不依赖 >4GB 盘。macOS 可证明占盘为后续独立项。 |
 | **KADV6 关键路径依赖真实 IPv6 环境验证** | `session_kadv6_integration_test.go` 的常规测试使用文档地址和内存合并；由 `GOED2K_RUN_KADV6_INTEGRATION=1` 启用的 live 测试虽检查本机 IPv6 出站地址，但仍只验证本地发布索引，没有公网 bootstrap、远端搜索或拨号。 | 常规 CI 通过不能证明公网 IPv6 bootstrap、发布、搜索和拨号可用。 | 中 | 在具备原生 IPv6 的独立 CI job 运行双节点和公开节点测试，记录路由收敛、发布可见性、来源拨号及无 IPv6 时的明确降级。 |
 | **Settings、bootstrap Config 与 ClientState 存在漂移** | `settings.go` 包含临时布局、Kad 发布、磁盘、Web 下载等字段；`bootstrap/config.go` 只映射其中一部分；`client_state.go` 只持久化部分运行配置，版本接受列表还跳过了版本 5/6。 | CLI、库、daemon 或重启后的行为可能不一致，新字段容易静默采用默认值。 | 中 | 建立字段清单和映射测试：默认值、CLI/env→Settings、Settings→状态快照→恢复逐项核对；明确哪些字段刻意不持久化并写入迁移测试。 |
 
@@ -77,7 +77,7 @@
 10. **`.part.met` 自动维护（已覆盖节流与崩溃恢复）**：创建/脏进度/Stop 原子写出；合法 `.tmp` 可恢复，损坏 `.tmp` 不覆盖旧文件。未改 180 KiB。
 11. **AICH 根请求闭环（已覆盖）**：缺根时向宣告 AICH 的来源发送 `OP_AICHFILEHASHREQ`，校验后保存首次根；块哈希按连接串行请求。缺根坏片不挂起。不覆盖已有根，不启用 MultiPacket 捆绑。
 12. **MultiPacket 真实线协议核对**：先 fixture/抓包；出站启用必须是后续单独 PR。
-13. **跨平台文件 PR 组**：Windows 稀疏/预分配、macOS 预分配、文件名清洗分别提交。
+13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
 14. **KADV6 真实 IPv6 CI**：先增加可选、可诊断的专用 job，再讨论功能扩展。
 15. **Settings/state 一致性**：增加映射清单、迁移和 round-trip 测试。
 16. **P2 项目**：高级搜索、Buddy/PeerCache、Kad2/桥接、完成搬运、互操作/fuzz 各自立项，不共享实现 PR。
