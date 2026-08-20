@@ -205,13 +205,14 @@ func TestQueuedPeerPauseResumeAndFailedReaskKeepDeadline(t *testing.T) {
 		t.Fatalf("恢复任务不应绕过远端队列期限: got=%d want=%d", stored.NextConnection, deadline)
 	}
 
+	stored.FailCount = 10
 	stored.NextConnection = 0 // 模拟到期后已经发起一次 TCP 重询。
 	reask := NewPeerConnection(session, endpoint, transfer, stored)
 	transfer.policy.SetConnection(stored, reask)
 	reask.Close(ConnectionTimeout)
 	reask.OnDisconnect(ConnectionTimeout)
 	stored = transfer.policy.FindPeer(endpoint)
-	if stored.FailCount != 1 {
+	if stored.FailCount != 11 {
 		t.Fatalf("失败的重询仍应计入普通连接失败，实际为 %d", stored.FailCount)
 	}
 	if rank, queued := stored.RemoteQueueState(); !queued || rank != 8 {
@@ -219,6 +220,9 @@ func TestQueuedPeerPauseResumeAndFailedReaskKeepDeadline(t *testing.T) {
 	}
 	if stored.NextConnection != sessionTime+remoteQueueReaskInterval {
 		t.Fatalf("失败重询应重新设置安全期限: got=%d want=%d", stored.NextConnection, sessionTime+remoteQueueReaskInterval)
+	}
+	if candidate := transfer.policy.FindConnectCandidate(stored.NextConnection); candidate == nil {
+		t.Fatal("已排队来源不应因普通失败计数超过上限而永久失去重询资格")
 	}
 }
 
@@ -273,6 +277,12 @@ func TestLowIDCallbackQueueStateUsesServerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("构造回调端点失败: %v", err)
 	}
+	if err := transfer.AddPeer(callbackEndpoint, int(PeerSourceExchange)); err != nil {
+		t.Fatalf("添加重复的可直连端点来源失败: %v", err)
+	}
+	if endpointPeer := transfer.policy.FindPeer(callbackEndpoint); endpointPeer == nil || !endpointPeer.Connectable {
+		t.Fatal("测试前置条件要求回调端点已作为可直连来源存在")
+	}
 	callback := NewPeerConnection(session, callbackEndpoint, nil, nil)
 	callback.callbackClientID = clientID
 	if err := transfer.AttachIncomingPeer(callback); err != nil {
@@ -304,5 +314,34 @@ func TestLowIDCallbackQueueStateUsesServerIdentity(t *testing.T) {
 	stored = transfer.policy.callbackPeer(clientID)
 	if rank, queued := stored.RemoteQueueState(); queued || rank != 0 {
 		t.Fatalf("回调来源 AcceptUpload 应清除逻辑排队状态: queued=%t rank=%d", queued, rank)
+	}
+}
+
+func TestQueueRankingErasesUnconnectableIncomingPeer(t *testing.T) {
+	const sessionTime int64 = 80_000_000
+	session, transfer := newTestTransfer(t)
+	previousTime := currentCachedTime.Swap(sessionTime)
+	t.Cleanup(func() { currentCachedTime.Store(previousTime) })
+	endpoint, err := protocol.EndpointFromString("8.9.10.11", 4662)
+	if err != nil {
+		t.Fatalf("构造入站端点失败: %v", err)
+	}
+	incoming := NewPeerConnection(session, endpoint, nil, nil)
+	if err := transfer.AttachIncomingPeer(incoming); err != nil {
+		t.Fatalf("关联入站连接失败: %v", err)
+	}
+	peer := transfer.policy.FindPeer(endpoint)
+	if peer == nil || peer.Connectable {
+		t.Fatal("测试前置条件要求策略中存在不可重连的入站来源")
+	}
+
+	incoming.HandleQueueRanking(&clientproto.QueueRanking{Rank: 21})
+	incoming.OnDisconnect(QueueRanking)
+
+	if stored := transfer.policy.FindPeer(endpoint); stored != nil {
+		t.Fatal("不可重连的入站 QueueRanking 来源必须从策略中回收")
+	}
+	if transfer.policy.Size() != 0 {
+		t.Fatalf("不可重连来源不应占用来源表，实际条目数为 %d", transfer.policy.Size())
 	}
 }

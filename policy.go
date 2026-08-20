@@ -32,8 +32,13 @@ func NewPolicy(t *Transfer) Policy {
 }
 
 func (p Policy) IsConnectCandidate(pe Peer) bool {
-	if pe.Connection != nil || !pe.Connectable || pe.FailCount > 10 {
+	if pe.Connection != nil || !pe.Connectable {
 		return false
+	}
+	if pe.FailCount > 10 {
+		if _, queued := pe.RemoteQueueState(); !queued {
+			return false
+		}
 	}
 	if !p.isPeerAllowed(pe) {
 		return false
@@ -249,9 +254,13 @@ func (p *Policy) ConnectionClosed(c *PeerConnection, sessionTime int64) {
 		if callbackPeer := p.callbackPeer(c.callbackClientID); callbackPeer != nil {
 			queuePeer = callbackPeer
 		}
+		if !queuePeer.Connectable {
+			p.removePeer(*peer)
+			return
+		}
 		queuePeer.LastConnected = sessionTime
 		queuePeer.markRemoteQueued(c.remoteQueueRank, sessionTime+remoteQueueReaskInterval)
-		if queuePeer != peer && !peer.Connectable {
+		if queuePeer != peer {
 			p.removePeer(*peer)
 		}
 		return
