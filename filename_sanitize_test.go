@@ -43,6 +43,10 @@ func TestSanitizeDownloadFilenameMappings(t *testing.T) {
 		{name: "保留名 COM1", in: "COM1.dat", goos: "windows", want: "COM1_.dat"},
 		{name: "保留名 LPT0", in: "lpt0.txt", goos: "windows", want: "lpt0_.txt"},
 		{name: "保留名 LPT9", in: "LPT9", goos: "windows", want: "LPT9_"},
+		{name: "保留名 CONIN$", in: "CONIN$", goos: "windows", want: "CONIN$_"},
+		{name: "保留名 CONOUT$", in: "conout$.log", goos: "windows", want: "conout$_.log"},
+		{name: "保留名 COM¹", in: "COM\u00b9.txt", goos: "windows", want: "COM\u00b9_.txt"},
+		{name: "保留名 LPT³", in: "lpt\u00b3", goos: "windows", want: "lpt\u00b3_"},
 		{name: "COM10 不是保留名", in: "COM10.bin", goos: "windows", want: "COM10.bin"},
 		{name: "Unix 不改 CON", in: "CON", goos: "linux", want: "CON"},
 		{name: "尾随点", in: "file.", goos: "windows", want: "file"},
@@ -56,6 +60,12 @@ func TestSanitizeDownloadFilenameMappings(t *testing.T) {
 		{name: "截断后去掉尾随空格", in: strings.Repeat("a", 200) + strings.Repeat(" ", 60) + "x", goos: "windows", want: strings.Repeat("a", 200)},
 		{name: "截断后重现保留名", in: "CON" + strings.Repeat(" ", 300) + "x", goos: "windows", want: "CON_"},
 		{name: "截断后重现 NUL", in: "nul" + strings.Repeat(" ", 300) + "x", goos: "windows", want: "nul_"},
+		{name: "控制台 CONIN$", in: "CONIN$", goos: "windows", want: "CONIN$_"},
+		{name: "控制台 CONOUT$", in: "conout$.txt", goos: "windows", want: "conout$_.txt"},
+		{name: "CLOCK$", in: "CLOCK$", goos: "windows", want: "CLOCK$_"},
+		{name: "上标 COM¹", in: "COM¹.dat", goos: "windows", want: "COM¹_.dat"},
+		{name: "上标 LPT³", in: "lpt³", goos: "windows", want: "lpt³_"},
+		{name: "Unix 不改 CONIN$", in: "CONIN$", goos: "linux", want: "CONIN$"},
 	}
 
 	for _, tt := range tests {

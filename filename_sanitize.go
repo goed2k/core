@@ -13,16 +13,20 @@ const downloadFilenameMaxBytes = 255
 
 var windowsReservedDeviceNames = map[string]struct{}{
 	"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
+	"CONIN$": {}, "CONOUT$": {}, "CLOCK$": {},
 	"COM0": {}, "COM1": {}, "COM2": {}, "COM3": {}, "COM4": {},
 	"COM5": {}, "COM6": {}, "COM7": {}, "COM8": {}, "COM9": {},
+	"COM\u00b9": {}, "COM\u00b2": {}, "COM\u00b3": {},
 	"LPT0": {}, "LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {},
 	"LPT5": {}, "LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
+	"LPT\u00b9": {}, "LPT\u00b2": {}, "LPT\u00b3": {},
 }
 
 // SanitizeDownloadFilename 将 ED2K 链接中的文件名清洗为可安全 filepath.Join 的单层名字。
 //
 // 所有平台都会去掉路径分隔与 ".." 穿越，只保留最后一层分量。
-// 仅在 Windows 上替换非法字符 <>:"|?*、控制字符、保留设备名，并去掉尾随点/空格。
+// 仅在 Windows 上替换非法字符 <>:"|?*、控制字符、保留设备名
+// （含 CONIN$/CONOUT$/COM¹ 等）并去掉尾随点/空格。
 // Unix 上合法字符（如冒号、竖线）保持不变，避免过度改名。
 func SanitizeDownloadFilename(name string) string {
 	return sanitizeDownloadFilename(name, runtime.GOOS)
@@ -60,7 +64,7 @@ func sanitizeWindowsFilename(name string) string {
 		return "_"
 	}
 	stem, ext := splitFilenameStem(name)
-	if _, reserved := windowsReservedDeviceNames[strings.ToUpper(stem)]; reserved {
+	if isWindowsReservedDeviceName(stem) {
 		name = stem + "_" + ext
 	}
 	if name == "" {
@@ -74,6 +78,34 @@ func replaceWindowsIllegalRune(r rune) rune {
 		return '_'
 	}
 	return r
+}
+
+func isWindowsReservedDeviceName(stem string) bool {
+	u := strings.ToUpper(stem)
+	if _, reserved := windowsReservedDeviceNames[u]; reserved {
+		return true
+	}
+	return isWindowsComLptStem(u)
+}
+
+// isWindowsComLptStem 识别 COM/LPT + 单个 ASCII 或上标数字（Win32 把 COM¹ 等视为设备名）。
+func isWindowsComLptStem(u string) bool {
+	if !strings.HasPrefix(u, "COM") && !strings.HasPrefix(u, "LPT") {
+		return false
+	}
+	rest := []rune(u[3:])
+	if len(rest) != 1 {
+		return false
+	}
+	r := rest[0]
+	if r >= '0' && r <= '9' {
+		return true
+	}
+	switch r {
+	case '¹', '²', '³':
+		return true
+	}
+	return false
 }
 
 func splitFilenameStem(name string) (stem, ext string) {
