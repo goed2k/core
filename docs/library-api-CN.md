@@ -59,7 +59,7 @@ import "github.com/goed2k/core"
 
 | 方法 | 作用 |
 |------|------|
-| `AddLink(linkValue, outputDir string) (TransferHandle, string, error)` | 解析 `ed2k://` 等链接并创建任务。链接文件名经 `SanitizeDownloadFilename` 后再 `filepath.Join`：始终去掉路径穿越；Windows 另清洗非法字符与保留名。`UseEmuleTempLayout` 时先写 `NNN.part`，完成后搬到 `IncomingDir`（空则同目录）下的最终名。 |
+| `AddLink(linkValue, outputDir string) (TransferHandle, string, error)` | 解析 `ed2k://` 等链接并创建任务。链接文件名经 `SanitizeDownloadFilename` 后再 `filepath.Join`：始终去掉路径穿越；Windows 另清洗非法字符与保留名。`UseEmuleTempLayout` 时先写 `NNN.part`，释放文件句柄后再搬到 Settings 已有 `IncomingDir`（空则同目录）下的最终名；目标已存在则用 `name (n).ext`，不覆盖。 |
 | `AddTransfer(AddTransferParams) (TransferHandle, error)` | 以参数结构体添加任务（哈希、大小、路径等）。 |
 | `FindTransfer(hash) TransferHandle` | 按文件哈希查找句柄（无效时 `IsValid()==false`）。 |
 | `Transfers() []TransferHandle` | 当前所有任务句柄。 |

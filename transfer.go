@@ -79,7 +79,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		size:               atp.Size,
 		numPieces:          int(DivCeil(atp.Size, PieceSize)),
 		filePath:           atp.FilePath,
-		finalName:          strings.TrimSpace(atp.FinalName),
+		finalName:          sanitizeTransferFinalName(atp.FinalName),
 		fileComment:        strings.TrimSpace(atp.FileComment),
 		stat:               NewStatistics(),
 		closedStat:         NewStatistics(),
@@ -129,6 +129,15 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 	} else {
 		t.state = Downloading
 		t.markResumeDirty()
+	}
+	if t.IsFinished() {
+		if s != nil && s.settings.UseEmuleTempLayout && isEmuleTempPartPath(t.GetFilePath()) {
+			t.closeAndSealHandler()
+			t.promoteEmuleTempPartIfNeeded()
+		}
+		if s != nil {
+			s.tryAddCompletedTransferToSharedStore(t)
+		}
 	}
 
 	return t, nil
@@ -902,7 +911,16 @@ func (t *Transfer) OnBlockRestoreCompleted(block data.PieceBlock, ec BaseErrorCo
 	}
 }
 
-func (t *Transfer) OnReleaseFile(_ BaseErrorCode, _ [][]byte, _ bool) {}
+func (t *Transfer) OnReleaseFile(_ BaseErrorCode, _ [][]byte, deleteFile bool) {
+	if deleteFile || !t.isFinishedForSharePublish() {
+		t.unsealHandler()
+		return
+	}
+	t.promoteEmuleTempPartIfNeeded()
+	if t.session != nil {
+		t.session.tryAddCompletedTransferToSharedStore(t)
+	}
+}
 
 func (t *Transfer) finished() {
 	for _, c := range t.connections {
@@ -912,13 +930,8 @@ func (t *Transfer) finished() {
 	}
 	t.connections = nil
 	t.state = Finished
-	if t.handler != nil {
-		_ = t.handler.Close()
-	}
-	t.promoteEmuleTempPartIfNeeded()
 	if t.session != nil {
 		t.session.SubmitDiskTask(NewAsyncRelease(t, false))
-		t.session.tryAddCompletedTransferToSharedStore(t)
 		t.session.PublishTransferToServer(t)
 		t.session.PublishTransferToKAD(t)
 		t.session.PublishTransferToKADV6(t)
@@ -928,27 +941,71 @@ func (t *Transfer) finished() {
 
 func (t *Transfer) promoteEmuleTempPartIfNeeded() {
 	if t == nil || t.session == nil || !t.session.settings.UseEmuleTempLayout {
+		t.unsealHandler()
 		return
 	}
 	src := t.GetFilePath()
 	if !isEmuleTempPartPath(src) {
+		t.unsealHandler()
 		return
 	}
 	name := t.finalName
 	if name == "" {
+		t.unsealHandler()
 		return
 	}
 	destDir := filepath.Dir(src)
 	if incoming := strings.TrimSpace(t.session.settings.IncomingDir); incoming != "" {
 		destDir = incoming
 	}
-	dest, err := promoteEmulePartFile(src, destDir, name, t.size)
+	dest, err := promoteEmulePartFile(src, destDir, name)
 	if err != nil {
 		debugPeerf("transfer %s promote part failed: %v", t.hash.String(), err)
+		t.unsealHandler()
+		return
+	}
+	if dest == src {
+		t.unsealHandler()
 		return
 	}
 	t.filePath = dest
-	t.handler = disk.NewDesktopFileHandler(dest)
+	if t.handler != nil {
+		_ = t.handler.Close()
+	}
+	if setter, ok := t.handler.(interface{ SetPath(string) error }); ok {
+		if err := setter.SetPath(dest); err != nil {
+			debugPeerf("transfer %s set handler path: %v", t.hash.String(), err)
+			t.unsealHandler()
+		}
+	} else {
+		t.unsealHandler()
+	}
+	if t.session.sharedStore != nil {
+		if sf := t.session.sharedStore.Get(t.hash); sf != nil && (sf.Path == src || isEmuleTempPartPath(sf.Path)) {
+			t.session.sharedStore.UpdatePath(t.hash, dest, filepath.Base(dest))
+		}
+	}
+	t.markResumeDirty()
+}
+
+func (t *Transfer) closeAndSealHandler() {
+	if t == nil || t.handler == nil {
+		return
+	}
+	if sealer, ok := t.handler.(interface{ CloseAndSeal() error }); ok {
+		_ = sealer.CloseAndSeal()
+		return
+	}
+	_ = t.handler.Close()
+}
+
+func (t *Transfer) unsealHandler() {
+	if t == nil || t.handler == nil {
+		return
+	}
+	if sealer, ok := t.handler.(interface{ Unseal() }); ok {
+		sealer.Unseal()
+	}
 }
 
 func (t *Transfer) AsyncRestoreBlock(block data.PieceBlock) {

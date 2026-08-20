@@ -18,9 +18,10 @@ type FileHandler interface {
 }
 
 type DesktopFileHandler struct {
-	path string
-	file *os.File
-	mu   sync.Mutex
+	path   string
+	file   *os.File
+	sealed bool
+	mu     sync.Mutex
 }
 
 func NewDesktopFileHandler(path string) *DesktopFileHandler {
@@ -32,6 +33,9 @@ func (h *DesktopFileHandler) ensureFile(flag int) (*os.File, error) {
 	defer h.mu.Unlock()
 	if h.file != nil {
 		return h.file, nil
+	}
+	if h.sealed {
+		return nil, errors.New("file handler is sealed")
 	}
 	f, err := os.OpenFile(h.path, flag, 0o644)
 	if err != nil {
@@ -51,14 +55,52 @@ func (h *DesktopFileHandler) Path() string {
 }
 
 func (h *DesktopFileHandler) Close() error {
+	return h.closeLocked(false)
+}
+
+// CloseAndSeal 在同一把锁里关闭并禁止 File() 按旧路径重建。
+func (h *DesktopFileHandler) CloseAndSeal() error {
+	return h.closeLocked(true)
+}
+
+func (h *DesktopFileHandler) closeLocked(seal bool) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if seal {
+		h.sealed = true
+	}
 	if h.file == nil {
 		return nil
 	}
 	err := h.file.Close()
 	h.file = nil
 	return err
+}
+
+// Seal 禁止 File() 在关闭后按旧路径 O_CREATE 重建（完成搬运窗口）。
+func (h *DesktopFileHandler) Seal() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sealed = true
+}
+
+// Unseal 允许再次按当前 path 打开。
+func (h *DesktopFileHandler) Unseal() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sealed = false
+}
+
+// SetPath 在文件已关闭时改写落盘路径（完成后重命名 NNN.part 用），并解除 seal。
+func (h *DesktopFileHandler) SetPath(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.file != nil {
+		return errors.New("cannot set path while file is open")
+	}
+	h.path = path
+	h.sealed = false
+	return nil
 }
 
 func (h *DesktopFileHandler) DeleteFile() error {

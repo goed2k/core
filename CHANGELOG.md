@@ -13,7 +13,7 @@
 - `disk.PreallocateSemantics`：公开当前平台预分配真实能力（Linux fallocate / Windows NTFS / 其余仅 Truncate）。
 - Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn；失败仍按间隔重试，避免每 tick 刷盘。
 - KADV6 发布端点支持注入本机 IPv6 探测器；默认 `go test` 用文档地址且禁用公网探测。可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 走真实出站地址。
-- `UseEmuleTempLayout` 任务完成后把 `NNN.part` 重命名到清洗后的最终文件名；`IncomingDir` 来自 eMule 配置或 Settings，空则留在临时目录。目标冲突且大小不同时使用 `name (n).ext`，同大小视为崩溃重试。
+- `UseEmuleTempLayout` 任务在释放文件句柄后把 `NNN.part` 搬到清洗后的最终文件名。目标目录优先已接入 Settings 的 `IncomingDir`（eMule 导入写入；空则用 part 所在目录，不发明默认 Incoming 路径）。目标已存在则改用 `name (n).ext`，不覆盖。同卷 `Rename`，仅跨卷失败时复制后删源。完成后删除 `.part.met` 旁注。`FinalName` 随任务 state 保存。
 - 服务器搜索支持最小布尔查询：`OR` / `NOT` / `-word`，默认 AND，左结合；过滤条件仍 AND。不支持括号。默认 AND 词仍按原标点切开以对齐 Kad 索引；OR/NOT/`-word` 操作数保持整词。`TokenizeSearchQuery` 跳过 NOT 操作数。
 - `StartSearch` 在 `SearchScopeDHT`/`All` 下，若已设置 KADV6 tracker 则同时启动 KADV6 关键字搜索，与 Kad4 结果按文件 hash 合并去重。无节点时不拨号。
 - `Policy.IsConnectCandidate` 使用 `Settings.MaxFailCount`（默认 20），不再硬编码 10。无 Settings 或 `<=0` 时回落 20。
@@ -22,11 +22,12 @@
 ### 变更
 
 - Windows 上 `UseSparseFiles` 会先 `FSCTL_SET_SPARSE` 再 Truncate；`PreallocateDiskSpace` 会设置 `FileAllocationInfo`。非 Linux/Windows 明确只 Truncate，不保证稀疏或占盘。
-- 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.5 MiB 分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
+- 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.28 MiB（9728000 字节）分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
 
 ### 修复
 
 - 二进制 `.part.met` 导入会把未完成分片中已下完的整块写入 `DownloadedBlocks`，不再只保留完全没有 gap 的 piece。半块仍丢弃。
+- `UseEmuleTempLayout` 完成搬运改为 `OnReleaseFile` 之后执行，避免未关句柄时改名、换新 handler 却让 PieceManager 仍指向旧路径。目标同大小不再当崩溃重试覆盖/删源。Linux 上 `errno 17`（EEXIST）不再误判为跨卷。搬运后重新标脏，避免 state 仍记录已消失的 `NNN.part`。释放后 seal handler，禁止 `File()` 在旧路径 `O_CREATE` 重建空文件挡住 Rename。恢复已完成任务时在 promote 后再写入 SharedStore，避免崩溃发生在释放前导致永久不共享。`CloseAndSeal` 同锁关闭并禁止重建。已有共享项仅当路径仍是 `NNN.part` 才改写，避免冲突改名后把别人的最终文件改指向副本。
 
 ## [0.1.3] - 2026-08-02
 

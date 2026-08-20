@@ -1,13 +1,16 @@
 package goed2k
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 var emuleTempPartName = regexp.MustCompile(`(?i)^\d{3}\.part$`)
@@ -69,11 +72,24 @@ func ImportEmulePartMetFromSlot(partPath string) (PartMetInfo, error) {
 	return ImportPartMet(partPath)
 }
 
+func sanitizeTransferFinalName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	return SanitizeDownloadFilename(name)
+}
+
 func isEmuleTempPartPath(path string) bool {
 	if path == "" {
 		return false
 	}
-	return emuleTempPartName.MatchString(filepath.Base(path))
+	base := filepath.Base(path)
+	if !emuleTempPartName.MatchString(base) {
+		return false
+	}
+	n, err := strconv.Atoi(base[:3])
+	return err == nil && n >= 1 && n <= 999
 }
 
 func uniqueCompletedPath(dir, name string) string {
@@ -98,24 +114,53 @@ func removeEmulePartSidecars(partPath string) {
 	}
 }
 
+var (
+	renameCompletedFile = os.Rename
+	errCrossDeviceLink  = errors.New("cross-device link")
+)
+
+func isCrossDeviceRename(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errCrossDeviceLink) || errors.Is(err, syscall.EXDEV) {
+		return true
+	}
+	var link *os.LinkError
+	if errors.As(err, &link) && link != nil {
+		return isCrossDeviceRename(link.Err)
+	}
+	if runtime.GOOS == "windows" {
+		var errno syscall.Errno
+		if errors.As(err, &errno) && errno == 17 {
+			return true
+		}
+	}
+	return false
+}
+
 func copyFileReplace(src, dest string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
 	tmp := dest + ".tmp." + strconv.Itoa(os.Getpid())
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
+		_ = in.Close()
 		return err
 	}
 	_, copyErr := io.Copy(out, in)
+	closeInErr := in.Close()
 	syncErr := out.Sync()
 	closeErr := out.Close()
-	if copyErr != nil || syncErr != nil || closeErr != nil {
+	if copyErr != nil || closeInErr != nil || syncErr != nil || closeErr != nil {
 		_ = os.Remove(tmp)
 		if copyErr != nil {
 			return copyErr
+		}
+		if closeInErr != nil {
+			return closeInErr
 		}
 		if syncErr != nil {
 			return syncErr
@@ -130,9 +175,9 @@ func copyFileReplace(src, dest string) error {
 }
 
 // promoteEmulePartFile 把已完成的 NNN.part 搬到 destDir/清洗后的文件名。
-// dest 已存在且大小匹配时视为崩溃重试成功，删除残留临时文件。
-// 同卷优先 Rename；跨卷回退为复制后删除源。
-func promoteEmulePartFile(src, destDir, filename string, fileSize int64) (string, error) {
+// 目标已存在则改用 name (n).ext，不覆盖已有文件。
+// 同卷优先 Rename；仅跨卷失败时回退为复制后删除源。
+func promoteEmulePartFile(src, destDir, filename string) (string, error) {
 	if !isEmuleTempPartPath(src) {
 		return src, fmt.Errorf("not an emule temp part: %s", src)
 	}
@@ -148,17 +193,15 @@ func promoteEmulePartFile(src, destDir, filename string, fileSize int64) (string
 		removeEmulePartSidecars(src)
 		return dest, nil
 	}
-	if info, err := os.Stat(dest); err == nil {
-		if fileSize > 0 && info.Size() == fileSize {
-			_ = os.Remove(src)
-			removeEmulePartSidecars(src)
-			return dest, nil
-		}
+	if _, err := os.Stat(dest); err == nil {
 		dest = uniqueCompletedPath(destDir, filename)
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	if err := os.Rename(src, dest); err != nil {
+	if err := renameCompletedFile(src, dest); err != nil {
+		if !isCrossDeviceRename(err) {
+			return "", err
+		}
 		if err := copyFileReplace(src, dest); err != nil {
 			return "", err
 		}
