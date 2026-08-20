@@ -112,15 +112,12 @@ func (s *Session) handleUDPReaskFilePing(addr *net.UDPAddr, payload []byte) {
 		s.sendClientUDP(addr, encodeFileNotFound())
 		return
 	}
-	client, multiple := s.UploadQueue().FindWaitingByIPUDP(addr)
+	client, multiple := s.UploadQueue().FindWaitingByIPUDP(addr, hash)
 	if multiple {
-		// 同 IP 多个 UDP 端口冲突时，eMule 不回答，迫使对端走 TCP。
+		// 同 IP+UDP 且同一文件出现多个等待项时不回答，迫使对端走 TCP。
 		return
 	}
 	if client != nil {
-		if src := client.ActiveUploadSource(); src == nil || !src.GetHash().Equal(hash) {
-			return
-		}
 		rank := s.UploadQueue().RefreshWaitingAsk(client)
 		s.sendClientUDP(addr, encodeReaskAck(rank))
 		return
@@ -158,6 +155,8 @@ func (s *Session) hasKnownFile(hash protocol.Hash) bool {
 	if s == nil || hash.Equal(protocol.Invalid) {
 		return false
 	}
+	// eMule FileNotFound 表示“没有这个文件”，不是“暂时不能上传”。
+	// 仍在下载、尚无完整分片的任务必须视为已知，否则对端会取消该来源。
 	if t := s.LookupTransfer(hash); t != nil && !t.IsAborted() {
 		return true
 	}
@@ -173,25 +172,23 @@ func (s *Session) withPendingUDPPeer(addr *net.UDPAddr, apply func(*Peer)) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var found *Peer
-	matches := 0
+	var pending []*Peer
 	for _, t := range s.transfers {
 		if t == nil {
 			continue
 		}
 		for i := range t.policy.peers {
 			peer := &t.policy.peers[i]
-			if !peerMatchesUDPAddr(peer, addr) {
+			if !peer.udpReaskPending || !peerMatchesUDPAddr(peer, addr) {
 				continue
 			}
-			matches++
-			found = peer
+			pending = append(pending, peer)
 		}
 	}
-	if matches != 1 || found == nil || !found.udpReaskPending {
-		return
+	// ACK/QueueFull/FileNotFound 不含文件 hash。只处理 pending 来源，避免同一 IP 上的其他下载把应答吃掉。
+	for _, peer := range pending {
+		apply(peer)
 	}
-	apply(found)
 }
 
 func (s *Session) sendClientUDP(addr *net.UDPAddr, pkt []byte) {

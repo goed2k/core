@@ -153,8 +153,9 @@ func (q *UploadQueue) IsUploading(client *PeerConnection) bool {
 	return slices.Index(q.uploading, client) >= 0
 }
 
-// FindWaitingByIPUDP 按 UDP 来源 IP+端口查找等待项。多个匹配时返回 multiple=true 且 client=nil，迫使对端走 TCP。
-func (q *UploadQueue) FindWaitingByIPUDP(addr *net.UDPAddr) (client *PeerConnection, multiple bool) {
+// FindWaitingByIPUDP 按 UDP 来源 IP+端口和文件 hash 查找等待项。
+// 多个匹配时返回 multiple=true 且 client=nil，迫使对端走 TCP。
+func (q *UploadQueue) FindWaitingByIPUDP(addr *net.UDPAddr, hash protocol.Hash) (client *PeerConnection, multiple bool) {
 	if q == nil || addr == nil {
 		return nil, false
 	}
@@ -162,6 +163,10 @@ func (q *UploadQueue) FindWaitingByIPUDP(addr *net.UDPAddr) (client *PeerConnect
 	count := 0
 	for _, current := range q.waiting {
 		if !uploadClientMatchesUDP(current, addr) {
+			continue
+		}
+		src := current.ActiveUploadSource()
+		if src == nil || !src.GetHash().Equal(hash) {
 			continue
 		}
 		count++

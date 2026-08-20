@@ -267,6 +267,86 @@ func TestDownloadUDPReaskIgnoresUnsolicitedAck(t *testing.T) {
 	}
 }
 
+func TestDownloadUDPReaskAckSelectsPendingPeerAmongSharedSources(t *testing.T) {
+	const sessionTime int64 = 92_000_000
+	session, first := newTestTransfer(t)
+	previousTime := currentCachedTime.Swap(sessionTime)
+	t.Cleanup(func() { currentCachedTime.Store(previousTime) })
+	second, err := NewTransfer(session, AddTransferParams{
+		Hash:       protocol.MustHashFromString("FEDCBA9876543210FEDCBA9876543210"),
+		CreateTime: CurrentTimeMillis(),
+		Size:       PieceSize * 2,
+	})
+	if err != nil {
+		t.Fatalf("构造第二任务失败: %v", err)
+	}
+	session.transfers[second.hash] = second
+
+	endpoint, err := protocol.EndpointFromString("12.12.12.12", 4662)
+	if err != nil {
+		t.Fatalf("构造来源地址失败: %v", err)
+	}
+	_, _ = attachRemoteQueueTestPeer(t, session, first, endpoint)
+	_, _ = attachRemoteQueueTestPeer(t, session, second, endpoint)
+	idle := first.policy.FindPeer(endpoint)
+	pending := second.policy.FindPeer(endpoint)
+	idle.UDPPort = 4672
+	idle.markRemoteQueued(9, sessionTime)
+	pending.UDPPort = 4672
+	pending.markRemoteQueued(4, sessionTime)
+	pending.udpReaskPending = true
+
+	session.handleClientUDP(&net.UDPAddr{IP: net.IPv4(12, 12, 12, 12), Port: 4672}, encodeReaskAck(2))
+	if rank, queued := idle.RemoteQueueState(); !queued || rank != 9 {
+		t.Fatalf("未 pending 的并行下载不应被 ACK 改写: queued=%t rank=%d", queued, rank)
+	}
+	if rank, queued := pending.RemoteQueueState(); !queued || rank != 2 {
+		t.Fatalf("pending 的并行下载应收到 ACK: queued=%t rank=%d", queued, rank)
+	}
+}
+
+func TestUploadUDPReaskUsesFileHashToDisambiguateWaitingClients(t *testing.T) {
+	session, first, local, remote, peerAddr := newUDPReaskLoopback(t)
+	defer local.Close()
+	defer remote.Close()
+	second, err := NewTransfer(session, AddTransferParams{
+		Hash:       protocol.MustHashFromString("FEDCBA9876543210FEDCBA9876543210"),
+		CreateTime: CurrentTimeMillis(),
+		Size:       PieceSize * 2,
+	})
+	if err != nil {
+		t.Fatalf("构造第二任务失败: %v", err)
+	}
+	session.transfers[second.hash] = second
+
+	endpoint, err := protocol.EndpointFromString("127.0.0.1", 4662)
+	if err != nil {
+		t.Fatalf("构造来源地址失败: %v", err)
+	}
+	firstPeer, firstConn := attachRemoteQueueTestPeer(t, session, first, endpoint)
+	secondPeer, secondConn := attachRemoteQueueTestPeer(t, session, second, endpoint)
+	firstPeer.UDPPort = uint16(peerAddr.Port)
+	secondPeer.UDPPort = uint16(peerAddr.Port)
+	firstConn.SetUploadState(UploadStateOnQueue)
+	firstConn.SetUploadQueueRank(3)
+	secondConn.SetUploadState(UploadStateOnQueue)
+	secondConn.SetUploadQueueRank(11)
+	q := session.UploadQueue()
+	q.waiting = append(q.waiting, firstConn, secondConn)
+
+	session.handleClientUDP(peerAddr, encodeReaskFilePing(second.GetHash()))
+	pkt := readUDPPacket(t, remote)
+	if !bytes.Equal(pkt, encodeReaskAck(11)) {
+		t.Fatalf("应按文件 hash 选择等待项: got % X", pkt)
+	}
+	if secondConn.lastUploadRequest == 0 {
+		t.Fatal("匹配的等待项应刷新 last asked")
+	}
+	if firstConn.lastUploadRequest != 0 {
+		t.Fatal("不同文件的等待项不应被刷新")
+	}
+}
+
 func TestHelloPersistsRemoteUDPPortForLaterReask(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	endpoint, err := protocol.EndpointFromString("10.1.2.3", 4662)
