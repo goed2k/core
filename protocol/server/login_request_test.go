@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"encoding/binary"
 	"testing"
 
 	"github.com/goed2k/core/protocol"
@@ -17,6 +16,7 @@ func TestNewLoginRequestKeepsBaseTags(t *testing.T) {
 	if login.Point.IP() != 0 {
 		t.Fatalf("登录 IP 未确定时必须为 0，不得谎报 ReportedIP: got %d", login.Point.IP())
 	}
+	assertOfficialLoginTagsOnly(t, login)
 	gotFlags, ok := loginUInt32Tag(login.Properties, ctServerFlags)
 	if !ok {
 		t.Fatal("缺少 CT_SERVER_FLAGS")
@@ -25,118 +25,44 @@ func TestNewLoginRequestKeepsBaseTags(t *testing.T) {
 	if gotFlags != wantFlags {
 		t.Fatalf("未启用扩展时能力位必须保持原值: got 0x%x want 0x%x", gotFlags, wantFlags)
 	}
-	if _, ok := loginUInt32Tag(login.Properties, ctUDPPort); ok {
-		t.Fatal("未提供 UDP 端口时不得写入 ET_UDPPORT")
-	}
-	if _, ok := loginUInt32Tag(login.Properties, ctObfuscationTCPPort); ok {
-		t.Fatal("未启用混淆时不得写入混淆 TCP 端口标签")
-	}
-	if _, ok := loginUInt32Tag(login.Properties, etComments); ok {
-		t.Fatal("0x24 是 ET_COMMENTS，Login 不得把它当作混淆端口")
-	}
 	if gotFlags&CapableIPInLogin != 0 {
 		t.Fatal("未携带真实 IP 时不得声明 CapableIPInLogin")
 	}
 }
 
-func TestLoginRequestExtendedTags(t *testing.T) {
+func TestLoginRequestCryptCapabilityBits(t *testing.T) {
 	hash := protocol.MustHashFromString("31D6CFE0D16AE931B73C59D7E0C089C0")
-	const listenPort = 4662
 	tests := []struct {
-		name           string
-		opts           LoginRequestOptions
-		wantUDP        bool
-		wantUDPPort    uint32
-		wantObfu       bool
-		wantObfuPort   uint32
-		wantCryptBits  uint32
-		forbidCryptBit bool
+		name          string
+		opts          LoginRequestOptions
+		wantCryptBits uint32
 	}{
 		{
-			name:           "无UDP无混淆",
-			opts:           LoginRequestOptions{},
-			forbidCryptBit: true,
+			name: "无混淆",
+			opts: LoginRequestOptions{},
 		},
 		{
-			name:        "有UDP无混淆",
-			opts:        LoginRequestOptions{UDPPort: 4672},
-			wantUDP:     true,
-			wantUDPPort: 4672,
-		},
-		{
-			name:          "无UDP有混淆端口",
-			opts:          LoginRequestOptions{ObfuscationTCPPort: 4665, EnableCryptLayer: true},
-			wantObfu:      true,
-			wantObfuPort:  4665,
+			name:          "启用混淆",
+			opts:          LoginRequestOptions{EnableCryptLayer: true},
 			wantCryptBits: CapableSupportCrypt | CapableRequestCrypt,
 		},
 		{
-			name:          "有UDP有混淆端口",
-			opts:          LoginRequestOptions{UDPPort: 4672, ObfuscationTCPPort: 4665, EnableCryptLayer: true},
-			wantUDP:       true,
-			wantUDPPort:   4672,
-			wantObfu:      true,
-			wantObfuPort:  4665,
-			wantCryptBits: CapableSupportCrypt | CapableRequestCrypt,
-		},
-		{
-			name:          "仅要求混淆且端口存在",
-			opts:          LoginRequestOptions{ObfuscationTCPPort: 4700, CryptLayerRequired: true},
-			wantObfu:      true,
-			wantObfuPort:  4700,
+			name:          "仅要求混淆",
+			opts:          LoginRequestOptions{CryptLayerRequired: true},
 			wantCryptBits: CapableSupportCrypt | CapableRequireCrypt,
 		},
 		{
-			name:           "UDP端口0不谎报",
-			opts:           LoginRequestOptions{UDPPort: 0, EnableCryptLayer: true, ObfuscationTCPPort: 4665},
-			wantObfu:       true,
-			wantObfuPort:   4665,
-			wantCryptBits:  CapableSupportCrypt | CapableRequestCrypt,
-			forbidCryptBit: false,
-		},
-		{
-			name:           "混淆端口0不谎报",
-			opts:           LoginRequestOptions{UDPPort: 4672, EnableCryptLayer: true, ObfuscationTCPPort: 0},
-			wantUDP:        true,
-			wantUDPPort:    4672,
-			wantCryptBits:  CapableSupportCrypt | CapableRequestCrypt,
-			forbidCryptBit: false,
-		},
-		{
-			name:           "未启用混淆却配置端口",
-			opts:           LoginRequestOptions{UDPPort: 4672, ObfuscationTCPPort: 4665},
-			wantUDP:        true,
-			wantUDPPort:    4672,
-			forbidCryptBit: true,
-		},
-		{
-			name:          "非法端口不上报",
-			opts:          LoginRequestOptions{UDPPort: 70000, ObfuscationTCPPort: -1, EnableCryptLayer: true},
-			wantCryptBits: CapableSupportCrypt | CapableRequestCrypt,
+			name:          "启用且要求混淆",
+			opts:          LoginRequestOptions{EnableCryptLayer: true, CryptLayerRequired: true},
+			wantCryptBits: CapableSupportCrypt | CapableRequestCrypt | CapableRequireCrypt,
 		},
 	}
 
 	baseFlags := uint32(CapableAuxPort | CapableNewTags | CapableUnicode | CapableLargeFile | CapableZlib)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			login := NewLoginRequestWith(hash, listenPort, "goed2k", tc.opts)
-			gotUDP, hasUDP := loginUInt32Tag(login.Properties, ctUDPPort)
-			if hasUDP != tc.wantUDP {
-				t.Fatalf("UDP 标签出现条件不符: has=%v want=%v", hasUDP, tc.wantUDP)
-			}
-			if tc.wantUDP && gotUDP != tc.wantUDPPort {
-				t.Fatalf("UDP 端口不符: got %d want %d", gotUDP, tc.wantUDPPort)
-			}
-			gotObfu, hasObfu := loginUInt32Tag(login.Properties, ctObfuscationTCPPort)
-			if hasObfu != tc.wantObfu {
-				t.Fatalf("混淆端口标签出现条件不符: has=%v want=%v", hasObfu, tc.wantObfu)
-			}
-			if tc.wantObfu && gotObfu != tc.wantObfuPort {
-				t.Fatalf("混淆端口不符: got %d want %d", gotObfu, tc.wantObfuPort)
-			}
-			if _, ok := loginUInt32Tag(login.Properties, etComments); ok {
-				t.Fatal("不得写入 ET_COMMENTS/0x24")
-			}
+			login := NewLoginRequestWith(hash, 4662, "goed2k", tc.opts)
+			assertOfficialLoginTagsOnly(t, login)
 			flags, ok := loginUInt32Tag(login.Properties, ctServerFlags)
 			if !ok {
 				t.Fatal("缺少 CT_SERVER_FLAGS")
@@ -148,9 +74,6 @@ func TestLoginRequestExtendedTags(t *testing.T) {
 			if cryptBits != tc.wantCryptBits {
 				t.Fatalf("混淆能力位不符: got 0x%x want 0x%x", cryptBits, tc.wantCryptBits)
 			}
-			if tc.forbidCryptBit && cryptBits != 0 {
-				t.Fatalf("未启用混淆时不得声明 crypt 能力: 0x%x", cryptBits)
-			}
 			if flags&CapableIPInLogin != 0 {
 				t.Fatal("不得声明 CapableIPInLogin")
 			}
@@ -158,12 +81,11 @@ func TestLoginRequestExtendedTags(t *testing.T) {
 	}
 }
 
-func TestLoginRequestRoundTripAndEndian(t *testing.T) {
+func TestLoginRequestRoundTripPreservesCryptFlags(t *testing.T) {
 	hash := protocol.MustHashFromString("31D6CFE0D16AE931B73C59D7E0C089C0")
 	original := NewLoginRequestWith(hash, 4662, "goed2k", LoginRequestOptions{
-		UDPPort:            0x1234,
-		ObfuscationTCPPort: 0x2345,
 		EnableCryptLayer:   true,
+		CryptLayerRequired: true,
 	})
 	var buf bytes.Buffer
 	if err := original.Put(&buf); err != nil {
@@ -172,8 +94,6 @@ func TestLoginRequestRoundTripAndEndian(t *testing.T) {
 	if buf.Len() != original.BytesCount() {
 		t.Fatalf("BytesCount 与编码长度不一致: count=%d raw=%d", original.BytesCount(), buf.Len())
 	}
-	assertLittleEndianPortTag(t, buf.Bytes(), ctUDPPort, 0x1234)
-	assertLittleEndianPortTag(t, buf.Bytes(), ctObfuscationTCPPort, 0x2345)
 
 	var restored LoginRequest
 	if err := restored.Get(bytes.NewReader(buf.Bytes())); err != nil {
@@ -182,13 +102,10 @@ func TestLoginRequestRoundTripAndEndian(t *testing.T) {
 	if !restored.Hash.Equal(original.Hash) || restored.Point != original.Point {
 		t.Fatalf("往返后头字段变化: %+v", restored)
 	}
-	gotUDP, _ := loginUInt32Tag(restored.Properties, ctUDPPort)
-	gotObfu, _ := loginUInt32Tag(restored.Properties, ctObfuscationTCPPort)
-	if gotUDP != 0x1234 || gotObfu != 0x2345 {
-		t.Fatalf("往返后端口标签变化 udp=%d obfu=%d", gotUDP, gotObfu)
-	}
+	assertOfficialLoginTagsOnly(t, restored)
 	flags, _ := loginUInt32Tag(restored.Properties, ctServerFlags)
-	if flags&(CapableSupportCrypt|CapableRequestCrypt) != CapableSupportCrypt|CapableRequestCrypt {
+	want := uint32(CapableSupportCrypt | CapableRequestCrypt | CapableRequireCrypt)
+	if flags&want != want {
 		t.Fatalf("往返后混淆能力位丢失: 0x%x", flags)
 	}
 
@@ -205,10 +122,34 @@ func TestLoginRequestRoundTripAndEndian(t *testing.T) {
 	if !ok {
 		t.Fatalf("类型断言失败: %T", packet)
 	}
-	gotUDP, _ = loginUInt32Tag(packed.Properties, ctUDPPort)
-	gotObfu, _ = loginUInt32Tag(packed.Properties, ctObfuscationTCPPort)
-	if gotUDP != 0x1234 || gotObfu != 0x2345 {
-		t.Fatalf("组包往返后端口标签变化 udp=%d obfu=%d", gotUDP, gotObfu)
+	assertOfficialLoginTagsOnly(t, *packed)
+	flags, _ = loginUInt32Tag(packed.Properties, ctServerFlags)
+	if flags&want != want {
+		t.Fatalf("组包往返后混淆能力位丢失: 0x%x", flags)
+	}
+}
+
+func assertOfficialLoginTagsOnly(t *testing.T, login LoginRequest) {
+	t.Helper()
+	if len(login.Properties) != 4 {
+		t.Fatalf("aMule/eMule Login 固定 4 个标签: got %d", len(login.Properties))
+	}
+	seen := map[byte]int{}
+	for _, tag := range login.Properties {
+		seen[tag.ID]++
+		switch tag.ID {
+		case etUDPPort:
+			t.Fatal("Login 不得写入 Hello ET_UDPPORT/0x21")
+		case etComments:
+			t.Fatal("Login 不得写入 ET_COMMENTS/0x24")
+		case stTCPObfuPort:
+			t.Fatal("Login 不得写入 server.met ST_TCPPORTOBFUSCATION/0x97")
+		}
+	}
+	for _, id := range []byte{ctVersion, ctServerFlags, ctName, ctEMuleVersion} {
+		if seen[id] != 1 {
+			t.Fatalf("缺少或重复官方 Login 标签 0x%02x: %d", id, seen[id])
+		}
 	}
 }
 
@@ -219,18 +160,4 @@ func loginUInt32Tag(tags protocol.TagList, id byte) (uint32, bool) {
 		}
 	}
 	return 0, false
-}
-
-func assertLittleEndianPortTag(t *testing.T, raw []byte, id byte, port uint32) {
-	t.Helper()
-	// new-style uint32 标签：type|0x80, id, value LE
-	pattern := []byte{protocol.TagTypeUint32 | 0x80, id}
-	idx := bytes.Index(raw, pattern)
-	if idx < 0 || idx+6 > len(raw) {
-		t.Fatalf("未找到标签 0x%02x 的小端编码头", id)
-	}
-	got := binary.LittleEndian.Uint32(raw[idx+2 : idx+6])
-	if got != port {
-		t.Fatalf("标签 0x%02x 字节序错误: got 0x%x want 0x%x", id, got, port)
-	}
 }
