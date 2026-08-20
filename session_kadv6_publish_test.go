@@ -63,6 +63,7 @@ func TestPublishSingleTransferKADV6IndexesKeyword(t *testing.T) {
 func TestPublishTransferToKADV6SkipsWithoutIPv6Endpoint(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	session.settings.EnableDHTv6 = true
+	session.settings.ListenPort = 0
 	transfer.state = Finished
 	session.dhtv6Tracker = NewKADV6Tracker(0, 0)
 
@@ -86,6 +87,34 @@ func TestNoteKadv6PublishClonesEndpoint(t *testing.T) {
 	}
 	if session.lastKadv6PeriodicPublishAt != 123 {
 		t.Fatalf("expected timestamp 123, got %d", session.lastKadv6PeriodicPublishAt)
+	}
+}
+
+func TestPublishSingleTransferKADV6SkipsSourceWhenLocalLowID(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	session.settings.EnableDHTv6 = true
+	session.clientID = 12345
+	transfer.state = Finished
+	transfer.filePath = "/tmp/demo-movie.mkv"
+
+	tracker := NewKADV6Tracker(0, 0)
+	seed := mustUDPAddrV6(t, "[2001:db8::1]:4672")
+	tracker.AddNode(seed)
+	session.dhtv6Tracker = tracker
+
+	tcpAddr := &net.TCPAddr{IP: net.ParseIP("2001:db8::42"), Port: 4661}
+	session.publishSingleTransferKADV6(tracker, tcpAddr, transfer)
+
+	if results := tracker.searchEntriesLocked(transfer.hash); len(results) != 0 {
+		t.Fatalf("LowID 本机不得向 KADV6 发布 SourceType=1 直连源, got %d", len(results))
+	}
+	keyword := pickKadKeyword(transfer.FileName())
+	keywordHash, err := protocol.HashFromData([]byte(keyword))
+	if err != nil {
+		t.Fatalf("keyword hash: %v", err)
+	}
+	if results := tracker.keywordEntriesLocked(keywordHash); len(results) != 1 {
+		t.Fatalf("expected keyword publish to continue, got %d", len(results))
 	}
 }
 

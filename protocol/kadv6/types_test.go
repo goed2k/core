@@ -74,6 +74,21 @@ func TestSearchEntryExtractsIPv6Source(t *testing.T) {
 	}
 }
 
+func TestSearchEntryRejectsLowIDSourceType(t *testing.T) {
+	ip := net.ParseIP("2001:db8::20").To16()
+	entry := SearchEntry{
+		Tags: []Tag{
+			{Type: TagTypeUint8, ID: TagAddrFamily, UInt64: uint64(AddrFamilyIPv6)},
+			{Type: TagTypeBytes, ID: TagSourceIP6, Bytes: bytes.Clone(ip)},
+			{Type: TagTypeUint16, ID: TagSourcePort, UInt64: 4662},
+			{Type: TagTypeUint8, ID: TagSourceType, UInt64: 2},
+		},
+	}
+	if _, ok := entry.SourceAddr(); ok {
+		t.Fatal("KADV6 SourceType=2 must not extract a dialable address")
+	}
+}
+
 func TestSearchEntryRejectsWrongFamily(t *testing.T) {
 	ip := net.ParseIP("2001:db8::20").To16()
 	entry := SearchEntry{

@@ -346,19 +346,7 @@ func (s *Session) SendDHTSourcesRequest(hash protocol.Hash, size int64, transfer
 	}
 	return s.dhtTracker.SearchSources(hash, size, func(results []kadproto.SearchEntry) {
 		logx.Debug("dht source search result", "hash", hash.String(), "results", len(results))
-		s.mu.Lock()
-		current := s.transfers[hash]
-		s.mu.Unlock()
-		if current == nil || current != transfer {
-			return
-		}
-		for _, entry := range results {
-			endpoint, ok := entry.SourceEndpoint()
-			if !ok || !endpoint.Defined() {
-				continue
-			}
-			_ = current.AddPeer(endpoint, int(PeerDHT))
-		}
+		s.mergeKadSearchSources(hash, transfer, results)
 	})
 }
 

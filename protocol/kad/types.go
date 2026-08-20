@@ -30,7 +30,34 @@ const (
 	TagSourcePort  byte = 0xFD
 	TagSourceIP    byte = 0xFE
 	TagSourceType  byte = 0xFF
+
+	// Kad TAG_SOURCETYPE。对照 eMule：1=HighID 直连，2=LowID，3=带 Buddy 的 LowID，4=HighID（含加密能力）。
+	// 本仓库消费 2/3 时只走 ED2K 服务器回调，不建立 FindBuddy TCP 隧道。
+	SourceTypeHighID      uint64 = 1
+	SourceTypeLowID       uint64 = 2
+	SourceTypeFirewalled  uint64 = 3
+	SourceTypeHighIDCrypt uint64 = 4
+
+	// kadLowIDLimit 与 goed2k.HighestLowIDED2K 一致，避免 protocol/kad 反向依赖根包。
+	kadLowIDLimit uint64 = 16777216
 )
+
+// SourceKind 区分 Kad 搜源结果是可直连还是只能回调。
+type SourceKind int
+
+const (
+	SourceKindUnknown  SourceKind = iota
+	SourceKindDirect              // HighID，可按 IP/端口拨号
+	SourceKindCallback            // LowID / 仅 client ID，走服务器回调
+)
+
+// SourceInfo 是 SearchEntry 的结构化来源语义，避免把 LowID 的 client ID 当成可拨号 IP。
+type SourceInfo struct {
+	Kind       SourceKind
+	SourceType uint64
+	Endpoint   protocol.Endpoint
+	ClientID   int32
+}
 
 type ID struct {
 	protocol.Hash
@@ -287,25 +314,82 @@ func (s SearchEntry) StringTag(id byte) (string, bool) {
 	return "", false
 }
 
-func (s SearchEntry) SourceEndpoint() (protocol.Endpoint, bool) {
-	ip, hasIP := s.UIntTag(TagSourceIP)
+func kadIsLowID(v uint64) bool {
+	return v > 0 && v < kadLowIDLimit
+}
+
+func (s SearchEntry) sourcePort() (uint64, bool) {
 	port, hasPort := s.UIntTag(TagSourcePort)
-	if !hasPort {
-		// 部分客户端只带 UDP 端口标签
-		port, hasPort = s.UIntTag(TagSourceUPort)
+	if hasPort && port != 0 {
+		return port, true
 	}
-	if !hasIP || !hasPort {
-		return protocol.Endpoint{}, false
+	port, hasPort = s.UIntTag(TagSourceUPort)
+	if hasPort && port != 0 {
+		return port, true
 	}
-	if ip == 0 || port == 0 {
-		return protocol.Endpoint{}, false
-	}
-	// eMule：1=HighID 2=LowID 3=回调 等。旧逻辑只接受 0/1/4，会丢弃绝大多数 LowID 来源。
+	return 0, false
+}
+
+func sourceInfoCallback(sourceType uint64, clientID uint64) SourceInfo {
+	return SourceInfo{Kind: SourceKindCallback, SourceType: sourceType, ClientID: int32(uint32(clientID))}
+}
+
+// SourceInfo 解析 Kad 搜源/发布条目：HighID 返回可拨号 Endpoint，LowID 只返回 client ID。
+func (s SearchEntry) SourceInfo() (SourceInfo, bool) {
 	sourceType, hasType := s.UIntTag(TagSourceType)
 	if hasType && sourceType > 0x20 {
+		return SourceInfo{}, false
+	}
+	if !hasType {
+		sourceType = 0
+	}
+	ip, hasIP := s.UIntTag(TagSourceIP)
+	port, hasPort := s.sourcePort()
+	clientLowID, hasClientLowID := s.UIntTag(TagClientLowID)
+	lowTyped := hasType && (sourceType == SourceTypeLowID || sourceType == SourceTypeFirewalled)
+	highTyped := !hasType || sourceType == 0 || sourceType == SourceTypeHighID || sourceType == SourceTypeHighIDCrypt
+
+	if lowTyped {
+		if hasClientLowID && kadIsLowID(clientLowID) {
+			return sourceInfoCallback(sourceType, clientLowID), true
+		}
+		if hasIP && kadIsLowID(ip) {
+			return sourceInfoCallback(sourceType, ip), true
+		}
+		return SourceInfo{}, false
+	}
+	if highTyped {
+		if hasIP && kadIsLowID(ip) {
+			return sourceInfoCallback(sourceType, ip), true
+		}
+		if hasIP && hasPort && ip != 0 {
+			return SourceInfo{
+				Kind:       SourceKindDirect,
+				SourceType: sourceType,
+				Endpoint:   protocol.NewEndpoint(int32(uint32(ip)), int(port)),
+			}, true
+		}
+		if hasClientLowID && kadIsLowID(clientLowID) {
+			return sourceInfoCallback(sourceType, clientLowID), true
+		}
+		return SourceInfo{}, false
+	}
+	if hasClientLowID && kadIsLowID(clientLowID) {
+		return sourceInfoCallback(sourceType, clientLowID), true
+	}
+	if hasIP && kadIsLowID(ip) {
+		return sourceInfoCallback(sourceType, ip), true
+	}
+	return SourceInfo{}, false
+}
+
+// SourceEndpoint 只返回可直连 HighID 地址；LowID/回调条目必须改走 SourceInfo。
+func (s SearchEntry) SourceEndpoint() (protocol.Endpoint, bool) {
+	info, ok := s.SourceInfo()
+	if !ok || info.Kind != SourceKindDirect || !info.Endpoint.Defined() {
 		return protocol.Endpoint{}, false
 	}
-	return protocol.NewEndpoint(int32(uint32(ip)), int(port)), true
+	return info.Endpoint, true
 }
 
 type SearchSourcesReq struct {

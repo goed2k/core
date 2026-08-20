@@ -42,6 +42,24 @@ func TestMergeKADV6SearchResultsAddsIPv6Peers(t *testing.T) {
 	}
 }
 
+func TestMergeKADV6SearchResultsRejectsLowIDSourceType(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	ip := net.ParseIP("2001:db8::42")
+	entry := kadv6.SearchEntry{
+		ID: kadv6.NewID(protocol.MustHashFromString("31D6CFE0D16AE931B73C59D7E0C089C0")),
+		Tags: []kadv6.Tag{
+			{Type: kadv6.TagTypeUint8, ID: kadv6.TagSourceType, UInt64: 2},
+			{Type: kadv6.TagTypeUint8, ID: kadv6.TagAddrFamily, UInt64: uint64(kadv6.AddrFamilyIPv6)},
+			{Type: kadv6.TagTypeBytes, ID: kadv6.TagSourceIP6, Bytes: append([]byte(nil), ip.To16()...)},
+			{Type: kadv6.TagTypeUint16, ID: kadv6.TagSourcePort, UInt64: 4662},
+		},
+	}
+	session.mergeKADV6SearchResults(transfer.hash, transfer, []kadv6.SearchEntry{entry})
+	if transfer.policy.Size() != 0 {
+		t.Fatalf("KADV6 LowID 条目不得当作可直连来源, got %d", transfer.policy.Size())
+	}
+}
+
 func TestMergeKADV6SearchResultsIgnoresStaleTransfer(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	session.transfers[transfer.hash] = transfer

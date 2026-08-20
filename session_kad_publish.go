@@ -28,6 +28,23 @@ func localOutboundIPv4() net.IP {
 	return nil
 }
 
+// kadSourcePublishEndpoint 按本机真实 ID 类型构造 Kad 发布地址：HighID 用 client ID（公网 IP），
+// LowID 发布 client ID 而不是不可达出站 IP；尚未获得 ID 时回退到出站 IPv4。
+func (s *Session) kadSourcePublishEndpoint() protocol.Endpoint {
+	if s == nil {
+		return protocol.Endpoint{}
+	}
+	port := s.GetListenPort()
+	if port <= 0 {
+		return protocol.Endpoint{}
+	}
+	clientID := s.GetClientID()
+	if clientID != 0 {
+		return protocol.NewEndpoint(clientID, port)
+	}
+	return s.kadPublishEndpoint()
+}
+
 func (s *Session) kadPublishEndpoint() protocol.Endpoint {
 	s.mu.Lock()
 	port := s.settings.ListenPort
@@ -126,7 +143,7 @@ func (s *Session) PublishTransferToKAD(t *Transfer) {
 	if t.IsPaused() || t.IsAborted() || !t.isKadPublishable() {
 		return
 	}
-	ep := s.kadPublishEndpoint()
+	ep := s.kadSourcePublishEndpoint()
 	if !ep.Defined() {
 		return
 	}
@@ -192,7 +209,7 @@ func (s *Session) publishAllFinishedTransfersKADAfterServerChange() {
 	if !s.settings.EnableDHT || s.dhtTracker == nil {
 		return
 	}
-	ep := s.kadPublishEndpoint()
+	ep := s.kadSourcePublishEndpoint()
 	if !ep.Defined() {
 		return
 	}
@@ -204,7 +221,7 @@ func (s *Session) maybePeriodicKadPublish(now int64) {
 	if !s.settings.EnableDHT || s.dhtTracker == nil {
 		return
 	}
-	ep := s.kadPublishEndpoint()
+	ep := s.kadSourcePublishEndpoint()
 	if !ep.Defined() {
 		return
 	}
