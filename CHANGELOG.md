@@ -14,6 +14,7 @@
 - Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn；失败仍按间隔重试，避免每 tick 刷盘。
 - KADV6 发布端点支持注入本机 IPv6 探测器；默认 `go test` 用文档地址且禁用公网探测。可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 走真实出站地址。
 - `UseEmuleTempLayout` 任务在释放文件句柄后把 `NNN.part` 搬到清洗后的最终文件名。目标目录优先已接入 Settings 的 `IncomingDir`（eMule 导入写入；空则用 part 所在目录，不发明默认 Incoming 路径）。目标已存在则改用 `name (n).ext`，不覆盖。同卷 `Rename`，仅跨卷失败时复制后删源。完成后删除 `.part.met` 旁注。`FinalName` 随任务 state 保存。
+- 服务器搜索支持最小布尔查询：`OR` / `NOT` / `-word`，默认 AND，左结合；过滤条件仍 AND。不支持括号。默认 AND 词仍按原标点切开以对齐 Kad 索引；OR/NOT/`-word` 操作数保持整词。`TokenizeSearchQuery` 跳过 NOT 操作数。
 
 ### 变更
 
