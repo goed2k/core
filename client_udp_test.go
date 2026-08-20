@@ -186,6 +186,22 @@ func TestUploadUDPReaskAckForKnownQueuedFile(t *testing.T) {
 	}
 }
 
+func TestUploadUDPReaskIncompleteTransferIsKnownNotFileNotFound(t *testing.T) {
+	session, transfer, local, remote, peerAddr := newUDPReaskLoopback(t)
+	defer local.Close()
+	defer remote.Close()
+	if transfer.CanUpload() {
+		t.Fatal("夹具任务尚无已完成分片，本例用于证明 FileNotFound 不等于不能上传")
+	}
+	session.handleClientUDP(peerAddr, encodeReaskFilePing(transfer.GetHash()))
+	_ = remote.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	buf := make([]byte, 64)
+	n, _, err := remote.ReadFromUDP(buf)
+	if err == nil && bytes.Equal(buf[:n], encodeFileNotFound()) {
+		t.Fatal("已知但尚不能上传的文件不得回 FileNotFound，否则对端会取消该来源")
+	}
+}
+
 func TestUploadUDPReaskFileNotFoundForUnknownHash(t *testing.T) {
 	session, _, local, remote, peerAddr := newUDPReaskLoopback(t)
 	defer local.Close()
