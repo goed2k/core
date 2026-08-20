@@ -613,13 +613,13 @@ func TestUploadQueuePrefersPeerWithBetterCredits(t *testing.T) {
 	peerA.SetUploadWaitStart(now - Seconds(10))
 	peerB.SetUploadWaitStart(now - Seconds(10))
 
-	queue.waiting = []*PeerConnection{peerB, peerA}
+	queue.waiting = []*uploadWaiter{newUploadWaiterFromClient(peerB), newUploadWaiterFromClient(peerA)}
 	queue.sortWaiting()
 
 	if len(queue.waiting) != 2 {
 		t.Fatalf("expected 2 queued peers, got %d", len(queue.waiting))
 	}
-	if queue.waiting[0] != peerA {
+	if queue.waiting[0] == nil || queue.waiting[0].client != peerA {
 		t.Fatal("expected peer with better credits to sort first")
 	}
 	if peerA.UploadQueueRank() != 1 || peerB.UploadQueueRank() != 2 {
@@ -668,7 +668,7 @@ func TestUploadQueuePrefersHighIDClientForNextSlot(t *testing.T) {
 	highPeer.SetUploadWaitStart(now - Seconds(5))
 	lowPeer.SetUploadWaitStart(now - Seconds(20))
 
-	queue.waiting = []*PeerConnection{lowPeer, highPeer}
+	queue.waiting = []*uploadWaiter{newUploadWaiterFromClient(lowPeer), newUploadWaiterFromClient(highPeer)}
 	queue.sortWaiting()
 	queue.addUpNextClient(nil)
 
@@ -716,7 +716,7 @@ func TestUploadQueueLowIDAddNextConnectGetsExtraSlot(t *testing.T) {
 	lowPeer.SetUploadAddNextConnect(true)
 
 	queue.uploading = []*PeerConnection{highPeer}
-	queue.waiting = []*PeerConnection{lowPeer}
+	queue.waiting = []*uploadWaiter{newUploadWaiterFromClient(lowPeer)}
 	queue.lastSlotHighID = true
 
 	queue.AddClientToQueue(lowPeer)
@@ -790,7 +790,7 @@ func TestUploadQueueSuspendAndResumeUpload(t *testing.T) {
 	if !queue.isSuspended(transfer.GetHash()) {
 		t.Fatal("expected transfer to be marked suspended")
 	}
-	if len(queue.waiting) != 1 || queue.waiting[0] != peer {
+	if len(queue.waiting) != 1 || queue.waiting[0] == nil || queue.waiting[0].client != peer {
 		t.Fatal("expected suspended peer moved back to waiting queue")
 	}
 
