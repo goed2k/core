@@ -92,18 +92,26 @@ func TestStartDHTSearchWithoutTrackersFailsClosed(t *testing.T) {
 func TestStartKADV6KeywordSearchNoNodesDoesNotStayBusy(t *testing.T) {
 	session := NewSession(NewSettings())
 	session.dhtv6Tracker = NewKADV6Tracker(0, 0)
-	params := SearchParams{Query: "barbaz", Scope: SearchScopeDHT}
-	task := newSearchTask(3, params, CurrentTime())
-	session.activeSearch = task
-	keywordHash, err := protocol.HashFromData([]byte("barbaz"))
+	handle, err := session.StartSearch(SearchParams{Query: "barbaz", Scope: SearchScopeDHT})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("start: %v", err)
 	}
-	if session.startKADV6KeywordSearch(task, params, keywordHash) {
-		t.Fatal("empty tracker should not start a live search")
+	snap := handle.Snapshot()
+	if snap.State != SearchStateFailed {
+		t.Fatalf("empty KADV6 tracker should fail closed, got %s", snap.State)
 	}
-	if task.dhtBusy || task.dhtPending != 0 {
-		t.Fatalf("failed KADV6 start left busy pending=%d", task.dhtPending)
+	if snap.DHTBusy {
+		t.Fatal("empty KADV6 tracker should not leave DHT busy")
+	}
+}
+
+func TestFailedKad4FinishDoesNotCompleteBeforeKADV6Reserved(t *testing.T) {
+	task := newSearchTask(5, SearchParams{Query: "barbaz"}, CurrentTime())
+	task.beginDHT()
+	task.beginDHT()
+	task.finishDHT()
+	if task.state != SearchStateRunning || !task.dhtBusy {
+		t.Fatalf("Kad4 fail must not finish while KADV6 is reserved, state=%s busy=%v", task.state, task.dhtBusy)
 	}
 }
 

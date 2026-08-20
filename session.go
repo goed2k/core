@@ -871,58 +871,51 @@ func (s *Session) startDHTSearch(task *searchTask, params SearchParams) bool {
 	task.updatedAt = CurrentTime()
 	task.mu.Unlock()
 
-	started := false
-	if s.startKad4KeywordSearch(task, params, keywordHash) {
-		started = true
-	}
-	if s.startKADV6KeywordSearch(task, params, keywordHash) {
-		started = true
-	}
-	return started
-}
-
-func (s *Session) startKad4KeywordSearch(task *searchTask, params SearchParams, keywordHash protocol.Hash) bool {
-	if s.dhtTracker == nil {
+	kad4Attempt := s.dhtTracker != nil
+	v6Attempt := s.dhtv6Tracker.hasSearchContacts()
+	if !kad4Attempt && !v6Attempt {
 		return false
 	}
-	task.beginDHT()
-	ok := s.dhtTracker.SearchKeywords(keywordHash, func(entries []kadproto.SearchEntry) {
-		s.searchMu.Lock()
-		current := s.activeSearch
-		s.searchMu.Unlock()
-		if current == nil || current != task {
-			return
-		}
-		for _, entry := range entries {
-			result := makeSearchResultFromKAD(entry)
-			if !matchesSearchFilters(result, params) {
-				continue
+	// 先为两路占位，避免 Kad4 启动失败把任务标成 Finished 后再启动 KADV6。
+	if kad4Attempt {
+		task.beginDHT()
+	}
+	if v6Attempt {
+		task.beginDHT()
+	}
+	kad4OK := false
+	if kad4Attempt {
+		kad4OK = s.dhtTracker.SearchKeywords(keywordHash, func(entries []kadproto.SearchEntry) {
+			s.searchMu.Lock()
+			current := s.activeSearch
+			s.searchMu.Unlock()
+			if current == nil || current != task {
+				return
 			}
-			task.mergeResult(result)
-		}
-		task.finishDHT()
-	})
-	if !ok {
-		task.finishDHT()
-		return false
+			for _, entry := range entries {
+				result := makeSearchResultFromKAD(entry)
+				if !matchesSearchFilters(result, params) {
+					continue
+				}
+				task.mergeResult(result)
+			}
+			task.finishDHT()
+		})
 	}
-	return true
-}
-
-func (s *Session) startKADV6KeywordSearch(task *searchTask, params SearchParams, keywordHash protocol.Hash) bool {
-	if !s.dhtv6Tracker.hasSearchContacts() {
-		return false
+	v6OK := false
+	if v6Attempt {
+		v6OK = s.dhtv6Tracker.SearchKeywords(keywordHash, func(entries []kadv6proto.SearchEntry) {
+			s.applyKADV6KeywordResults(task, params, entries)
+			task.finishDHT()
+		})
 	}
-	task.beginDHT()
-	ok := s.dhtv6Tracker.SearchKeywords(keywordHash, func(entries []kadv6proto.SearchEntry) {
-		s.applyKADV6KeywordResults(task, params, entries)
+	if kad4Attempt && !kad4OK {
 		task.finishDHT()
-	})
-	if !ok {
-		task.finishDHT()
-		return false
 	}
-	return true
+	if v6Attempt && !v6OK {
+		task.finishDHT()
+	}
+	return kad4OK || v6OK
 }
 
 func (s *Session) applyKADV6KeywordResults(task *searchTask, params SearchParams, entries []kadv6proto.SearchEntry) {
