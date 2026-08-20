@@ -311,6 +311,9 @@ func TestNewTransferPromotesFinishedEmulePart(t *testing.T) {
 	if filepath.Base(handle.GetFilePath()) != "restored.bin" {
 		t.Fatalf("restored finished part should promote, path %s", handle.GetFilePath())
 	}
+	if sf := session.sharedStore.Get(protocol.EMule); sf == nil || filepath.Base(sf.Path) != "restored.bin" {
+		t.Fatalf("restored finished part must re-enter SharedStore, got %+v", sf)
+	}
 }
 
 func TestOnReleaseFileDoesNotPromoteUnfinished(t *testing.T) {

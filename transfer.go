@@ -130,12 +130,17 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		t.state = Downloading
 		t.markResumeDirty()
 	}
-	if t.IsFinished() && s != nil && s.settings.UseEmuleTempLayout && isEmuleTempPartPath(t.GetFilePath()) {
-		if t.handler != nil {
-			_ = t.handler.Close()
+	if t.IsFinished() {
+		if s != nil && s.settings.UseEmuleTempLayout && isEmuleTempPartPath(t.GetFilePath()) {
+			if t.handler != nil {
+				_ = t.handler.Close()
+			}
+			t.sealHandler()
+			t.promoteEmuleTempPartIfNeeded()
 		}
-		t.sealHandler()
-		t.promoteEmuleTempPartIfNeeded()
+		if s != nil {
+			s.tryAddCompletedTransferToSharedStore(t)
+		}
 	}
 
 	return t, nil
