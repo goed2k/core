@@ -2,6 +2,7 @@ package goed2k
 
 import (
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -66,6 +67,54 @@ func TestKADV6PublishSearchPipelineUsesInjectedEndpoint(t *testing.T) {
 	got, ok := entries[0].SourceAddr()
 	if !ok || got.String() != "[2001:db8::42]:4661" {
 		t.Fatalf("unexpected published source %v ok=%v", got, ok)
+	}
+}
+
+func TestKadv6UnitTestsDoNotDiscoverPublicIPv6(t *testing.T) {
+	if os.Getenv("GOED2K_RUN_KADV6_INTEGRATION") == "1" {
+		t.Skip("live 模式使用真实探测器")
+	}
+	session := NewSession(NewSettings())
+	session.settings.ListenPort = 4661
+	session.settings.EnableDHTv6 = true
+	if session.kadv6PublishEndpoint() != nil {
+		t.Fatal("unit tests must not discover a public IPv6 via probe")
+	}
+	session.dhtv6Tracker = NewKADV6Tracker(0, 0)
+	session.SecondTick(CurrentTime(), 100)
+	if session.lastKadv6PublishTCPAddr != nil {
+		t.Fatal("SecondTick must not publish via public IPv6 probe in unit tests")
+	}
+}
+
+// TestKADV6PublishSearchPipelineLive 可选：真实探测本机出站 IPv6 后写入本地索引。
+func TestKADV6PublishSearchPipelineLive(t *testing.T) {
+	skipUnlessKADV6Integration(t)
+
+	session, transfer := newTestTransfer(t)
+	session.settings.EnableDHTv6 = true
+	session.settings.ListenPort = 4661
+	transfer.state = Finished
+
+	tracker := NewKADV6Tracker(0, 0)
+	seed := mustUDPAddrV6(t, "[2001:db8::1]:4672")
+	tracker.AddNode(seed)
+	session.dhtv6Tracker = tracker
+
+	tcpAddr := session.kadv6PublishEndpoint()
+	if tcpAddr == nil {
+		t.Fatal("expected IPv6 publish endpoint on IPv6-capable host")
+	}
+
+	session.PublishTransferToKADV6(transfer)
+
+	entries := tracker.searchEntriesLocked(transfer.hash)
+	if len(entries) == 0 {
+		t.Fatal("expected published source in local index after PublishTransferToKADV6")
+	}
+	got, ok := entries[0].SourceAddr()
+	if !ok || got.Port != tcpAddr.Port {
+		t.Fatalf("unexpected published source %v ok=%v want port %d", got, ok, tcpAddr.Port)
 	}
 }
 

@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `fd3a616`（2026-08-20 审查，含 Windows 文件名清洗与跨平台预分配语义）。
+- **基线**：`main` 分支提交 `5468847`（2026-08-20 审查，含 Settings/bootstrap/state v8）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -48,7 +48,7 @@
 | **AICH 根哈希主动请求已覆盖；MultiPacket 捆绑与真实联调仍待后续** | 收到匹配的 `FileStatusAnswer`/`HashSetAnswer` 后，若对端 Hello `AICHVersion!=0` 且任务尚无根，连接会发送一次 `OP_AICHFILEHASHREQ`（0x9E）。`AICHFileHashAnswer` 拒绝文件 hash 不匹配、零根和冲突根，只接受首次合法根；`SetAICHRootHash` 不覆盖已有根。缺根时坏片仍整片重下，同时向 AICH 来源补请求根，避免无应答时永久挂起。根到达后对已挂起的块哈希请求按连接串行派出（每个连接同时只挂一个 `pendingAICHPiece`）。不把根请求塞进 MultiPacket。 | 链接或状态未带 AICH 根时，可在握手阶段补齐根；之后坏片才能走 AICH 局部恢复。根未到之前的坏片回落整片重下。对端不回答则该连接不再重试根请求，其他 AICH 来源仍可请求。 | 中 | 已有状态机测试：缺根 FileStatus 请求一次、无 AICH/已有根/hash 不匹配不请求、应答保存/拒绝/冲突、根到达后补块哈希、缺根坏片不挂起、忙连接不覆盖分片索引。仍需真实 eMule/aMule 联调；MultiPacket 内嵌根请求属独立项。 |
 | **MultiPacket EXT2 线格式未经真实协议证明** | `protocol/client/multipacket.go` 将完整已编码帧整体 zlib 压缩；测试只做本实现 Pack/Unpack 自洽。`peer_connection_p1.go:tryCoalesceOutgoingMultiPacket` 为空，出站禁用。 | 本地往返通过不能证明符合 eMule 线格式；贸然开启可能导致解包失败、连接中断或与 CryptLayer 时序冲突。 | 高 | 先收集 eMule/aMule golden 抓包和源码定义，建立单向 fixture 测试，不能只做自身 round-trip；分别覆盖明文、CryptLayer、半包、尾随帧和未知子包，再决定是否启用出站。 |
 | **Windows 文件名清洗与跨平台预分配语义已覆盖；macOS 仍仅 Truncate** | `SanitizeDownloadFilename` 在 `filepath.Join` 前去掉穿越与 `..`；仅 Windows 替换 `<>:"|?*`、控制字符、保留设备名和尾随点/空格，Unix 合法名（如冒号）不改。`disk.PreallocateSemantics` 明确三类能力：Linux `fallocate`、Windows NTFS `FSCTL_SET_SPARSE`/`FileAllocationInfo`、其余平台仅 Truncate 且不保证稀疏/占盘。`UseSparseFiles` 优先于 `PreallocateDiskSpace`。未实现 macOS `F_PREALLOCATE`。 | Windows 上非法/保留名可落盘；Settings 不再假装非 Linux 已 fallocate。macOS 仍只扩逻辑大小。清洗后不同非法名可能映射到同一文件名。 | 中 | 已有表驱动映射、保留名、穿越、超长截断、Unix 不改合法名，以及 Windows 稀疏属性/分配簇、Linux `st_blocks` 测试；均不依赖 >4GB 盘。macOS 可证明占盘为后续独立项。 |
-| **KADV6 发布/合并单测已不依赖本机公网 IPv6；真实叠加层 CI 仍待后续** | `kadv6PublishEndpoint` 可通过 `Session.detectOutboundIPv6` 注入文档地址；`ListenPort=0` 或探测器返回 nil 时确定性跳过。常规测试用 `2001:db8::` 走 `PublishTransferToKADV6` 与内存索引，不再拨号 `2001:4860:4860::8888`。未覆盖公网 bootstrap、远端搜索或拨号。 | 常规 CI 即可证明发布端点选择与本地索引闭环。公网 IPv6 路由/搜索仍不能由本机探测代替。 | 中 | 已有注入探测器、ListenPort=0、探测器 nil、文档地址发布索引测试。具备原生 IPv6 的独立 CI job（双节点/公开节点）仍为后续项。 |
+| **KADV6 发布/合并单测已不依赖本机公网 IPv6；真实叠加层 CI 仍待后续** | `kadv6PublishEndpoint` 可通过 `Session.detectOutboundIPv6` 注入文档地址；`ListenPort=0` 或探测器返回 nil 时确定性跳过。`TestMain` 默认把 `localOutboundIPv6Detect` 换成空实现，常规 `go test` 不会拨号 `2001:4860:4860::8888`。可选 live：`GOED2K_RUN_KADV6_INTEGRATION=1`。未覆盖公网 bootstrap、远端搜索或拨号。 | 常规 CI 即可证明发布端点选择与本地索引闭环，且无 IPv6 主机也不会因 400ms 探测超时变慢。公网 IPv6 路由/搜索仍不能由本机探测代替。 | 中 | 已有注入探测器、ListenPort=0、探测器 nil、文档地址发布索引、单元测试不发现公网 IPv6。Integration 工作流保留可选 `kadv6_ipv6` job。具备原生 IPv6 的双节点/公开节点 job 仍为后续项。 |
 | **Settings / bootstrap / state 映射已覆盖可持久化策略；过程字段仍刻意不落盘** | `BuildSettings` 映射临时布局、Kad 部分发布、磁盘预分配/稀疏、Web 下载与速率。CLI `bootstrapConfig` 从 `DefaultConfig` 起步并叠加 `GOED2K_*`，避免零值把默认 true 的策略打成 false。`ClientState` 升到 v8 写入 `settings` 子集；`migrateClientState` 接受 0–8。本仓库从未发布独立 schema 5/6，按 v7 兼容 JSON 升级，拒绝未知版本时在错误中说明。无 `settings` 的 v7 保持构造值。`InitClient` 在 `LoadState` 后用本次 Config 覆盖。自动保存失败记入 `LastAutoSaveError` 并 Warn，且仍按 `SetAutoSaveInterval` 节流重试。不持久化 Logger、UserAgent、端口、DHT 开关、连接池与超时。 | 重启后磁盘/Web/速率策略可恢复；CLI/env 启动参数仍优先于旧 state。嵌入方自行 `LoadState` 后应再覆盖，否则旧 state 可能压过当前配置。端口与 DHT 仍由本次进程配置决定。磁盘满时不会每 100ms tick 狂写 state。 | 中 | 已有默认值对齐、env→Config、CLI 默认值/env、Config→Settings、Settings 往返、v5/v6 升级、无 settings 的 v7 保持构造值、未知版本拒绝、Config 覆盖旧 state、自动保存失败可观测、失败按间隔重试，以及 ClientName/MaxPeerListSize 不恢复测试。 |
 
 ## 5. P2：高级能力与长期质量
@@ -78,7 +78,7 @@
 11. **AICH 根请求闭环（已覆盖）**：缺根时向宣告 AICH 的来源发送 `OP_AICHFILEHASHREQ`，校验后保存首次根；块哈希按连接串行请求。缺根坏片不挂起。不覆盖已有根，不启用 MultiPacket 捆绑。
 12. **MultiPacket 真实线协议核对**：先 fixture/抓包；出站启用必须是后续单独 PR。
 13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
-14. **KADV6 真实 IPv6 CI（单测已不依赖本机公网 IPv6）**：发布端点可注入，常规 CI 覆盖本地索引闭环。公网 bootstrap/远端搜索的专用 job 仍待后续。
+14. **KADV6 真实 IPv6 CI（单测已不依赖本机公网 IPv6）**：发布端点可注入，`TestMain` 默认禁用公网探测；可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 仍走真实出站地址。公网 bootstrap/远端搜索的专用 job 仍待后续。
 15. **Settings/state 一致性（已覆盖可持久化策略）**：Config/env/CLI 映射与 v8 快照/恢复、从未发布的 5/6 按 v7 兼容升级、自动保存失败可观测且按间隔重试。过程调优字段仍刻意不持久化。
 16. **P2 项目**：高级搜索、Buddy/PeerCache、Kad2/桥接、完成搬运、互操作/fuzz 各自立项，不共享实现 PR。
 

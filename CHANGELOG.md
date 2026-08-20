@@ -12,7 +12,7 @@
 - ED2K 链接文件名落盘前清洗：去掉路径穿越；Windows 另替换非法字符、控制字符、保留设备名和尾随点/空格。
 - `disk.PreallocateSemantics`：公开当前平台预分配真实能力（Linux fallocate / Windows NTFS / 其余仅 Truncate）。
 - Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn；失败仍按间隔重试，避免每 tick 刷盘。
-- KADV6 发布端点支持注入本机 IPv6 探测器；单测用文档地址，不再拨号公网 IPv6。
+- KADV6 发布端点支持注入本机 IPv6 探测器；默认 `go test` 用文档地址且禁用公网探测。可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 走真实出站地址。
 
 ### 变更
 

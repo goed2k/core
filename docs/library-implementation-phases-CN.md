@@ -150,7 +150,7 @@
 **要点**：
 
 - `.github/workflows/ci.yml`：`go vet`、`-race` 测试、构建。
-- `test_support_test.go`：外网 ED2K 联调默认跳过（`GOED2K_RUN_LIVE_TESTS`）。KADV6 发布/合并单测走注入探测器，默认随 `go test` 运行。
+- `test_support_test.go`：外网 ED2K 联调默认跳过（`GOED2K_RUN_LIVE_TESTS`）。KADV6 发布/合并单测走注入探测器，默认随 `go test` 运行；可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 使用真实出站探测。
 
 ---
 

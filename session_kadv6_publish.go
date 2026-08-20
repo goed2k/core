@@ -16,7 +16,15 @@ func (s *Session) outboundIPv6() net.IP {
 	return localOutboundIPv6()
 }
 
+// localOutboundIPv6Detect 默认探测本机出站 IPv6。单元测试在 TestMain 换成空实现，
+// 除非设置 GOED2K_RUN_KADV6_INTEGRATION=1。
+var localOutboundIPv6Detect = probeLocalOutboundIPv6
+
 func localOutboundIPv6() net.IP {
+	return localOutboundIPv6Detect()
+}
+
+func probeLocalOutboundIPv6() net.IP {
 	c, err := net.DialTimeout("udp6", "[2001:4860:4860::8888]:53", 400*time.Millisecond)
 	if err != nil {
 		return nil
