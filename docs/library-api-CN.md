@@ -112,7 +112,7 @@ import "github.com/goed2k/core"
 | `SetStatePath(path string)` | 使用内置 JSON 文件存储。 |
 | `SetStateStore(ClientStateStore)` | 自定义存储（需实现 `Load`/`Save`）。 |
 | `StatePath() string` | 当前文件路径（若使用文件存储）。 |
-| `LoadState(path string) error` | 从路径加载（与 `SetStatePath` 配合）。接受状态版本 0–8。本仓库从未发布独立 schema 5/6（从 4 跳到 7），现按与 v7 兼容的可叠加 JSON 升级。v8 恢复磁盘/Web/速率等策略子集；无 `settings` 的 v7 保持构造时 Settings。`Logger`、端口、DHT 开关等过程字段不恢复。 |
+| `LoadState(path string) error` | 从路径加载（与 `SetStatePath` 配合）。接受状态版本 0–9。本仓库从未发布独立 schema 5/6（从 4 跳到 7），现按与 v7 兼容的可叠加 JSON 升级。v8 恢复磁盘/Web/速率等策略子集；v9 把 190 KiB 块索引重映射为 180 KiB（只保留被完整覆盖的新块）。无 `settings` 的 v7 保持构造时 Settings。`Logger`、端口、DHT 开关等过程字段不恢复。 |
 | `SaveState(path string) error` | 保存到路径。 |
 | `SetAutoSaveInterval(d time.Duration)` | 自动保存间隔（内部循环触发）。失败会记入 `LastAutoSaveError()` 并打 Warn，成功后清除。失败仍按该间隔重试，不会每个 tick 狂写。 |
 | `LastAutoSaveError() error` | 最近一次自动保存错误；成功后为 `nil`。 |

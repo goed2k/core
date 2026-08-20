@@ -97,10 +97,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 	if len(atp.PieceHashes) > 0 {
 		t.hashSet = append(t.hashSet, atp.PieceHashes...)
 	}
-	blocksInLastPiece := int(DivCeil(atp.Size%PieceSize, BlockSize))
-	if blocksInLastPiece == 0 {
-		blocksInLastPiece = 1
-	}
+	blocksInLastPiece := blocksInLastPieceForSize(atp.Size)
 	t.picker = NewPiecePicker(t.numPieces, blocksInLastPiece)
 	t.policy = NewPolicy(t)
 

@@ -154,6 +154,56 @@ func TestWebCacheStoresDownloadedBlock(t *testing.T) {
 	}
 }
 
+func TestHttpSourceLastPieceBlockRange(t *testing.T) {
+	UpdateCachedTime()
+	block := data.NewPieceBlock(0, BlocksPerPiece-1)
+	wantSize := block.Size(PieceSize)
+	if wantSize != 140*1024 {
+		t.Fatalf("last block size=%d, want 143360", wantSize)
+	}
+	payload := make([]byte, wantSize)
+	for i := range payload {
+		payload[i] = byte(i % 199)
+	}
+
+	var gotRange string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		rng := block.Range(PieceSize)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rng.Left, rng.Right-1, PieceSize))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	settings := NewSettings()
+	settings.EnableWebDownload = true
+	session := NewSession(settings)
+	handle, err := session.AddTransferParams(AddTransferParams{
+		Hash:       protocol.MustHashFromString("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"),
+		CreateTime: CurrentTimeMillis(),
+		Size:       PieceSize,
+		Handler:    disk.NewDesktopFileHandler(filepath.Join(t.TempDir(), "last.bin")),
+	})
+	if err != nil {
+		t.Fatalf("add transfer: %v", err)
+	}
+	registerTransferFileCleanup(t, handle)
+
+	raw, err := handle.transfer.fetchHttpBlock(server.URL+"/file.bin", block)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	rng := block.Range(PieceSize)
+	wantHeader := fmt.Sprintf("bytes=%d-%d", rng.Left, rng.Right-1)
+	if gotRange != wantHeader {
+		t.Fatalf("Range %q, want %q", gotRange, wantHeader)
+	}
+	if len(raw) != wantSize {
+		t.Fatalf("payload %d, want %d", len(raw), wantSize)
+	}
+}
+
 func TestNormalizeHTTPSourceURL(t *testing.T) {
 	got, err := normalizeHTTPSourceURL("https://example.com/files/a.bin")
 	if err != nil {

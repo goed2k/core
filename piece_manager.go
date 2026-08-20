@@ -40,7 +40,7 @@ func (p *PieceManager) WriteBlock(block data.PieceBlock, buffer []byte) ([][]byt
 		return nil, NewError(IOException)
 	}
 	debugPeerf("piece manager write block piece=%d block=%d len=%d", block.PieceIndex, block.PieceBlock, len(buffer))
-	bytesOffset := block.BlocksOffset() * BlockSize
+	bytesOffset := block.FileOffset()
 	if _, err := file.Seek(bytesOffset, io.SeekStart); err != nil {
 		_ = p.handler.Close()
 		return nil, NewError(IOException)
@@ -57,7 +57,7 @@ func (p *PieceManager) RestoreBlock(block data.PieceBlock, fileSize int64) ([][]
 	if file == nil {
 		return nil, nil, NewError(IOException)
 	}
-	bytesOffset := block.BlocksOffset() * BlockSize
+	bytesOffset := block.FileOffset()
 	if _, err := file.Seek(bytesOffset, io.SeekStart); err != nil {
 		return nil, nil, NewError(IOException)
 	}
