@@ -11,6 +11,9 @@ const (
 	MaxPeerListSize         = 100
 	MinReconnectTimeout     = 10
 	SourceExchangePeerLimit = 80
+	// remoteQueueReaskInterval 对齐 eMule FILEREASKTIME（29 分钟）。
+	// TCP 可在收到 QueueRanking 后关闭，但在此期限前不能重新询问同一来源。
+	remoteQueueReaskInterval = 29 * 60 * 1000
 )
 
 type Policy struct {
@@ -178,10 +181,10 @@ func (p *Policy) FindConnectCandidate(sessionTime int64) *Peer {
 		if !p.IsConnectCandidate(pe) {
 			continue
 		}
-		if candidate != -1 && p.ComparePeers(p.peers[candidate], pe) {
+		if pe.NextConnection != 0 && sessionTime < pe.NextConnection {
 			continue
 		}
-		if pe.NextConnection != 0 && pe.NextConnection < sessionTime {
+		if candidate != -1 && p.ComparePeers(p.peers[candidate], pe) {
 			continue
 		}
 		if pe.LastConnected != 0 && (sessionTime < pe.LastConnected+Seconds(int64(pe.FailCount+1))*MinReconnectTimeout) {
@@ -223,19 +226,32 @@ func (p *Policy) ConnectOnePeer(sessionTime int64) (bool, error) {
 }
 
 func (p *Policy) ConnectionClosed(c *PeerConnection, sessionTime int64) {
-	peer := c.peerInfo
+	peer := p.peerForConnection(c)
 	if peer == nil {
 		return
 	}
 	peer.Connection = nil
-	if c.DisconnectCode().Code() == TransferPaused.Code() {
+	switch c.DisconnectCode().Code() {
+	case TransferPaused.Code():
+		if _, queued := peer.RemoteQueueState(); queued {
+			peer.LastConnected = sessionTime
+			p.deferRemoteQueueReask(peer, sessionTime)
+			return
+		}
 		peer.NextConnection = 0
 		peer.LastConnected = 0
+		return
+	case QueueRanking.Code():
+		peer.LastConnected = sessionTime
+		peer.markRemoteQueued(c.remoteQueueRank, sessionTime+remoteQueueReaskInterval)
 		return
 	}
 	peer.LastConnected = sessionTime
 	if c.failed {
 		peer.FailCount++
+	}
+	if _, queued := peer.RemoteQueueState(); queued {
+		p.deferRemoteQueueReask(peer, sessionTime)
 	}
 	if !peer.Connectable {
 		for i := range p.peers {
@@ -247,8 +263,35 @@ func (p *Policy) ConnectionClosed(c *PeerConnection, sessionTime int64) {
 	}
 }
 
+func (p *Policy) deferRemoteQueueReask(peer *Peer, sessionTime int64) {
+	if peer != nil && peer.NextConnection <= sessionTime {
+		// 重询连接失败或被暂停时保留逻辑排队身份，并避免短退避造成过密询问。
+		peer.NextConnection = sessionTime + remoteQueueReaskInterval
+	}
+}
+
+func (p *Policy) peerForConnection(c *PeerConnection) *Peer {
+	if p == nil || c == nil || c.peerInfo == nil {
+		return nil
+	}
+	peer := c.peerInfo
+	pos, found := slices.BinarySearchFunc(p.peers, *peer, func(a, b Peer) int { return a.Compare(b) })
+	if !found {
+		return nil
+	}
+	c.SetPeer(&p.peers[pos])
+	return &p.peers[pos]
+}
+
+func (p *Policy) ClearRemoteQueue(c *PeerConnection) {
+	if peer := p.peerForConnection(c); peer != nil {
+		peer.clearRemoteQueue()
+	}
+}
+
 func (p *Policy) SetConnection(peer *Peer, c *PeerConnection) {
 	peer.Connection = c
+	c.SetPeer(peer)
 }
 
 func (p Policy) shouldEraseImmediately(peer Peer) bool {

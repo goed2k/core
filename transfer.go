@@ -638,6 +638,9 @@ func (t *Transfer) ResumeWithState() {
 	t.pause = false
 	for i := range t.policy.peers {
 		if t.policy.peers[i].Connection == nil {
+			if _, queued := t.policy.peers[i].RemoteQueueState(); queued {
+				continue
+			}
 			t.policy.peers[i].NextConnection = 0
 			t.policy.peers[i].LastConnected = 0
 		}

@@ -10,13 +10,15 @@ import (
 )
 
 type Peer struct {
-	LastConnected  int64
-	NextConnection int64
-	FailCount      int
-	Connectable    bool
-	SourceFlag     int
-	Connection     any
-	Endpoint       protocol.Endpoint
+	LastConnected   int64
+	NextConnection  int64
+	FailCount       int
+	Connectable     bool
+	SourceFlag      int
+	Connection      any
+	Endpoint        protocol.Endpoint
+	remoteQueueRank uint16
+	inRemoteQueue   bool
 	// ServerClientID 非零表示服务器来源的低 ID 用户 ID（Endpoint 的 IP 字段实为 client ID）。
 	ServerClientID int32
 	// DialAddr 可选；非 nil 时优先用于 TCP 拨号（如 KADV6 纯 IPv6 来源），与 Endpoint 可并存（IPv4 时常同步）。
@@ -24,6 +26,33 @@ type Peer struct {
 	// UserHash / CryptOptions 来自 Source Exchange v4，用于协议混淆拨号。
 	UserHash     protocol.Hash
 	CryptOptions uint8
+}
+
+// RemoteQueueState 返回本来源在远端上传队列中的最近排名及排队状态。
+// 状态由下载侧 QueueRanking/AcceptUpload 状态机维护，调用方只能读取。
+func (p *Peer) RemoteQueueState() (rank uint16, queued bool) {
+	if p == nil {
+		return 0, false
+	}
+	return p.remoteQueueRank, p.inRemoteQueue
+}
+
+func (p *Peer) markRemoteQueued(rank uint16, nextConnection int64) {
+	if p == nil {
+		return
+	}
+	p.remoteQueueRank = rank
+	p.inRemoteQueue = true
+	p.NextConnection = nextConnection
+}
+
+func (p *Peer) clearRemoteQueue() {
+	if p == nil {
+		return
+	}
+	p.remoteQueueRank = 0
+	p.inRemoteQueue = false
+	p.NextConnection = 0
 }
 
 func NewPeer(ep protocol.Endpoint) Peer {
