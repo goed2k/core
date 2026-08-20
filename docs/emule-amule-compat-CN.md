@@ -49,7 +49,7 @@
 | **MultiPacket EXT2 已核对：不做出站/宣告** | eMule 源码证明 `OP_MULTIPACKET_EXT2` 载荷是 FileIdentifier + 子 opcode（如请求文件名/状态），不是完整 TCP 帧再 zlib。本仓库 `PackMultiPacketExt2` 把已编码帧整体压缩，线格式错误。`tryCoalesceOutgoingMultiPacket` 为空，Hello 不宣告 MultiPacket。 | 不会对 eMule/aMule 发出错误 MultiPacket。入站 expand 维持现状。错误格式的 Pack/Unpack 仅自洽，不能当互操作证据。 | 高 | 已用官方源码核对载荷结构；刻意不实现正确 EXT2 出站（需独立 FileIdentifier 子包状态机，超出本路线图）。 |
 | **Windows 文件名清洗与跨平台预分配语义已覆盖；macOS 仍仅 Truncate** | `SanitizeDownloadFilename` 在 `filepath.Join` 前去掉穿越与 `..`；仅 Windows 替换 `<>:"|?*`、控制字符、保留设备名和尾随点/空格，Unix 合法名（如冒号）不改。`disk.PreallocateSemantics` 明确三类能力：Linux `fallocate`、Windows NTFS `FSCTL_SET_SPARSE`/`FileAllocationInfo`、其余平台仅 Truncate 且不保证稀疏/占盘。`UseSparseFiles` 优先于 `PreallocateDiskSpace`。未实现 macOS `F_PREALLOCATE`。 | Windows 上非法/保留名可落盘；Settings 不再假装非 Linux 已 fallocate。macOS 仍只扩逻辑大小。清洗后不同非法名可能映射到同一文件名。 | 中 | 已有表驱动映射、保留名、穿越、超长截断、Unix 不改合法名，以及 Windows 稀疏属性/分配簇、Linux `st_blocks` 测试；均不依赖 >4GB 盘。macOS 可证明占盘为后续独立项。 |
 | **KADV6 发布/合并单测已不依赖本机公网 IPv6；真实叠加层 CI 仍待后续** | `kadv6PublishEndpoint` 可通过 `Session.detectOutboundIPv6` 注入文档地址；`ListenPort=0` 或探测器返回 nil 时确定性跳过。`TestMain` 默认把 `localOutboundIPv6Detect` 换成空实现，常规 `go test` 不会拨号 `2001:4860:4860::8888`。可选 live：`GOED2K_RUN_KADV6_INTEGRATION=1`。未覆盖公网 bootstrap、远端搜索或拨号。 | 常规 CI 即可证明发布端点选择与本地索引闭环，且无 IPv6 主机也不会因 400ms 探测超时变慢。公网 IPv6 路由/搜索仍不能由本机探测代替。 | 中 | 已有注入探测器、ListenPort=0、探测器 nil、文档地址发布索引、单元测试不发现公网 IPv6。Integration 工作流保留可选 `kadv6_ipv6` job。具备原生 IPv6 的双节点/公开节点 job 仍为后续项。 |
-| **Settings / bootstrap / state 映射已覆盖可持久化策略；过程字段仍刻意不落盘** | `BuildSettings` 映射临时布局、Kad 部分发布、磁盘预分配/稀疏、Web 下载与速率。CLI `bootstrapConfig` 从 `DefaultConfig` 起步并叠加 `GOED2K_*`，避免零值把默认 true 的策略打成 false。`ClientState` 升到 v9：v8 写入 `settings` 子集，v9 重映射 190→180 KiB 块索引；`migrateClientState` 接受 0–9。本仓库从未发布独立 schema 5/6，按 v7 兼容 JSON 升级，拒绝未知版本时在错误中说明。无 `settings` 的 v7 保持构造值。`InitClient` 在 `LoadState` 后用本次 Config 覆盖。自动保存失败记入 `LastAutoSaveError` 并 Warn，且仍按 `SetAutoSaveInterval` 节流重试。不持久化 Logger、UserAgent、端口、DHT 开关、连接池与超时。 | 重启后磁盘/Web/速率策略可恢复；CLI/env 启动参数仍优先于旧 state。嵌入方自行 `LoadState` 后应再覆盖，否则旧 state 可能压过当前配置。端口与 DHT 仍由本次进程配置决定。磁盘满时不会每 100ms tick 狂写 state。 | 中 | 已有默认值对齐、env→Config、CLI 默认值/env、Config→Settings、Settings 往返、v5/v6 升级、无 settings 的 v7 保持构造值、未知版本拒绝、Config 覆盖旧 state、自动保存失败可观测、失败按间隔重试，以及 ClientName/MaxPeerListSize 不恢复测试。 |
+| **Settings / bootstrap / state 映射已覆盖可持久化策略；过程字段仍刻意不落盘** | `BuildSettings` 映射临时布局、Kad 部分发布、磁盘预分配/稀疏、Web 下载与速率。CLI `bootstrapConfig` 从 `DefaultConfig` 起步并叠加 `GOED2K_*`，避免零值把默认 true 的策略打成 false。`ClientState` 升到 v9：v8 写入 `settings` 子集，v9 重映射 190→180 KiB 块索引；`migrateClientState` 接受 0–9。`Policy.IsConnectCandidate` 使用 `Settings.MaxFailCount`（默认 20，`<=0` 回落 20），不再硬编码 10。不持久化 Logger、UserAgent、端口、DHT 开关、连接池与超时。 | 重启后磁盘/Web/速率策略可恢复。来源失败阈值可按 Settings 调整。端口与 DHT 仍由本次进程配置决定。 | 中 | 已有默认值对齐及 `MaxFailCount=2` 拒绝 / 默认 20 边界测试。`MaxPeerListSize` 仍用包常量 100，未接 Settings。Kad/KADV6 路由 `FailCount>=20` 是独立阈值。 |
 
 ## 5. P2：高级能力与长期质量
 
@@ -60,6 +60,8 @@
 | **Kad2 与 Kad4↔KADV6 桥接缺失** | `protocol/kad/` 与 `protocol/kadv6/` 是独立实现；`docs/kadv6-protocol*.md` 明确当前无桥接，仓库未见 Kad2 状态机。 | 无法参与对应网络或跨叠加层共享来源。 | 很高 | 先形成协议设计和安全边界 RFC；使用独立互操作节点验证路由、发布、搜索、去环和隐私，不与其他 P0/P1 改动同 PR。 |
 | **`NNN.part` 完成后重命名已覆盖最小闭环** | 仅 `UseEmuleTempLayout`：`finished()` 只排队 `AsyncRelease`；`OnReleaseFile` 在句柄关闭后把 `001`–`999.part` 搬到 Settings 已有 `IncomingDir`（空则 part 所在目录，不发明默认路径）。目标已存在一律 `name (n).ext`，不按同大小当崩溃重试。同卷 `Rename`，仅 EXDEV/Windows 跨卷回退 copy（Linux errno 17 不当跨卷）。旁注删除 `.met` / `.part.met`。`FinalName` 随 state 保存。恢复已完成 `.part` 会再 promote。未做跨卷事务日志或 Windows 占用重试队列。 | 临时布局完成后不再长期停在 `001.part`。目标冲突不覆盖已有文件。未完成释放不搬运。 | 中 | 已有同目录改名、Incoming 冲突、同大小不覆盖、EXDEV copy、非跨卷失败保留源、`finished()` 须等释放、关闭布局不搬、恢复已完成 `.part`、未完成不搬、Linux EEXIST 测试。 |
 | **真实互操作与 fuzz 矩阵不足** | `protocol_e2e_test.go`、`phase_h_test.go` 以本实现双端/本地 fixture 为主；仓库未建立覆盖关键解析器的持续 fuzz corpus，也没有多版本 eMule/aMule 矩阵。 | 自洽实现可能双方共同犯错，边界包、畸形包和版本差异难以及时发现。 | 高（持续） | 建立 Windows eMule、Linux/macOS aMule、多版本、HighID/LowID、明文/混淆、大文件矩阵；对 Hello、标签、Queue/ReAsk、MultiPacket、Kad、`.part.met` 等解析器运行持续 fuzz，并归档抓包 fixture。 |
+| **其余有证据、可做的小项（未做）** | `Policy.AddPeer` 仍用包常量 `MaxPeerListSize=100`，忽略 `Settings.MaxPeerListSize`。`IncomingDir` 未纳入可持久化 Settings 子集。搜索不支持括号/引号。UDPVer 2+ part status 未做。macOS 仍仅 Truncate。 | 名单上限、目录恢复、复杂搜索与高 UDPVer 仍与 eMule 有差距。 | 中 | 各项需独立 PR；本路线图不再混提。 |
+| **刻意不做 / 证据不足的剩余** | MultiPacket EXT2 出站（线格式已核对错误，保持禁用）。IRC、浏览共享、Kad2、完整 Buddy 隧道、Captcha UI。Kad/KADV6 路由失败阈值与 Policy `MaxFailCount` 是否应对齐尚无官方证据。 | 不会发出错误 MultiPacket；高级社交/NAT 能力低于完整客户端。 | — | 无新实现 PR。 |
 
 ## 6. 分步 PR 顺序
 
@@ -80,7 +82,7 @@
 13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
 14. **KADV6 真实 IPv6 CI（单测已不依赖本机公网 IPv6）**：发布端点可注入，`TestMain` 默认禁用公网探测；可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 仍走真实出站地址。公网 bootstrap/远端搜索的专用 job 仍待后续。
 15. **Settings/state 一致性（已覆盖可持久化策略）**：Config/env/CLI 映射与 v8 快照/恢复、从未发布的 5/6 按 v7 兼容升级、自动保存失败可观测且按间隔重试。过程调优字段仍刻意不持久化。
-16. **P2 项目**：Server 最小布尔搜索与 KADV6 纳入 `StartSearch` 已覆盖；括号/引号、Buddy/PeerCache、Kad2/桥接、互操作/fuzz 各自立项，不共享实现 PR。`NNN.part` 完成搬运已覆盖最小闭环。MultiPacket EXT2 出站已核对并明确不做。
+16. **P2 项目**：Server 最小布尔、KADV6 `StartSearch`、`NNN.part` 搬运、`Settings.MaxFailCount` 接入 Policy 已覆盖。其余可做小项见上表（`MaxPeerListSize` 常量、IncomingDir 持久化、括号搜索、UDPVer 2+、macOS 预分配）。Buddy/Kad2/IRC/浏览共享/Captcha/MultiPacket 出站刻意不做。
 
 ## 7. 多轮审计门禁
 
