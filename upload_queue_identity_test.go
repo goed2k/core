@@ -345,3 +345,58 @@ func TestOnDisconnectParksPersistentWaitIdentity(t *testing.T) {
 		t.Fatalf("OnDisconnect 不得重置等待起点: got=%d want=%d", queue.waiting[0].waitStart, waitStart)
 	}
 }
+
+func TestUploadQueueProcessDoesNotDeleteReattachedIdentity(t *testing.T) {
+	session, transfer := newUploadableTestTransfer(t)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("12121212121212121212121212121212")
+	first := newQueuedUploadPeer(t, session, transfer, "10.0.0.13", 4662, userHash, 4672)
+	queue.AddClientToQueue(first)
+	waitStart := first.UploadWaitStart()
+	queue.onClientDisconnect(first)
+
+	second := newQueuedUploadPeer(t, session, transfer, "10.0.0.13", 4663, userHash, 4672)
+	queue.AddClientToQueue(second)
+	if len(queue.waiting) != 1 || queue.waiting[0].client != second {
+		t.Fatal("重连后应附着到同一等待身份")
+	}
+
+	first.uploadState = UploadStateUploading
+	queue.uploading = append([]*PeerConnection{first}, queue.uploading...)
+	queue.Process()
+	if len(queue.waiting) != 1 || queue.waiting[0].client != second {
+		t.Fatal("旧上传连接的 Process 清理不得按 UserHash 删除已重连身份")
+	}
+	if second.UploadWaitStart() != waitStart {
+		t.Fatalf("Process 后等待起点被改动: got=%d want=%d", second.UploadWaitStart(), waitStart)
+	}
+}
+
+func TestUploadQueueDetachedScoreKeepsFilePriority(t *testing.T) {
+	const sessionTime int64 = 90_000_000
+	previousTime := currentCachedTime.Swap(sessionTime)
+	t.Cleanup(func() { currentCachedTime.Store(previousTime) })
+
+	session, transfer := newUploadableTestTransfer(t)
+	transfer.SetUploadPriority(UploadPriorityPowerShare)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("13131313131313131313131313131313")
+	conn := newQueuedUploadPeer(t, session, transfer, "10.0.0.14", 4662, userHash, 4672)
+	queue.AddClientToQueue(conn)
+	waitStart := sessionTime - Seconds(10)
+	conn.SetUploadWaitStart(waitStart)
+	queue.waiting[0].waitStart = waitStart
+	attached := queue.waiting[0].score(session)
+	if attached == 0 {
+		t.Fatal("PowerShare 附着评分不应为 0")
+	}
+	queue.onClientDisconnect(conn)
+	detached := queue.waiting[0].score(session)
+	if detached != attached {
+		t.Fatalf("断开后应保留文件优先级因子: detached=%d attached=%d", detached, attached)
+	}
+}

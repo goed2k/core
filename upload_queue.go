@@ -32,6 +32,7 @@ type uploadWaiter struct {
 	lowID          bool
 	friendSlot     bool
 	boundToConn    bool
+	priorityFactor float64
 }
 
 type UploadQueue struct {
@@ -196,7 +197,8 @@ func (q *UploadQueue) RemoveFromWaitingQueue(client *PeerConnection) bool {
 	if client == nil {
 		return false
 	}
-	w := q.findWaiter(client)
+	// 只按连接指针删除，避免旧上传连接的 Process/踢人按 UserHash 拆掉已重连身份。
+	w := q.findAttachedWaiter(client)
 	if w == nil {
 		return false
 	}
@@ -575,6 +577,10 @@ func (w *uploadWaiter) captureFromClient(client *PeerConnection) {
 	w.friendSlot = client.FriendSlot()
 	w.addNextConnect = w.addNextConnect || client.UploadAddNextConnect()
 	w.boundToConn = hash.Equal(protocol.Invalid)
+	w.priorityFactor = UploadPriorityNormal.ScoreFactor()
+	if src := client.ActiveUploadSource(); src != nil {
+		w.priorityFactor = src.UploadPriority().ScoreFactor()
+	}
 }
 
 func (w *uploadWaiter) attach(client *PeerConnection) {
@@ -631,6 +637,9 @@ func (w *uploadWaiter) score(session *Session) uint32 {
 	base := float64(CurrentTime()-waitStart) / 1000.0
 	if session != nil && session.Credits() != nil && !w.userHash.Equal(protocol.Invalid) {
 		base *= session.Credits().ScoreRatio(w.userHash)
+	}
+	if w.priorityFactor > 0 {
+		base *= w.priorityFactor
 	}
 	if base < 0 {
 		return 0
