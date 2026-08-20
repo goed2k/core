@@ -29,9 +29,12 @@ ServerPort=4661
 
 func TestApplyEmulePreferencesSetsTempLayout(t *testing.T) {
 	st := NewSettings()
-	ApplyEmulePreferences(&st, EmulePreferences{TempDir: "/var/temp"})
+	ApplyEmulePreferences(&st, EmulePreferences{TempDir: "/var/temp", IncomingDir: "/var/incoming"})
 	if !st.UseEmuleTempLayout {
 		t.Fatal("expected UseEmuleTempLayout when TempDir set")
+	}
+	if st.IncomingDir != "/var/incoming" {
+		t.Fatalf("IncomingDir %q", st.IncomingDir)
 	}
 }
 

@@ -83,6 +83,7 @@ type ClientTransferState struct {
 	Size         int64                        `json:"size"`
 	CreateTime   int64                        `json:"create_time"`
 	TargetPath   string                       `json:"target_path"`
+	FinalName    string                       `json:"final_name,omitempty"`
 	Paused       bool                         `json:"paused"`
 	UploadPrio   UploadPriority               `json:"upload_prio,omitempty"`
 	DownloadPrio TransferPriority             `json:"download_prio,omitempty"`
@@ -298,6 +299,7 @@ func (c *Client) snapshotState() (*ClientState, error) {
 			Size:         handle.GetSize(),
 			CreateTime:   handle.GetCreateTime(),
 			TargetPath:   path,
+			FinalName:    handle.transfer.finalName,
 			Paused:       handle.IsPaused(),
 			UploadPrio:   handle.transfer.UploadPriority(),
 			DownloadPrio: handle.transfer.DownloadPriority(),
@@ -392,6 +394,7 @@ func (c *Client) applyState(state *ClientState) error {
 			CreateTime:  record.CreateTime,
 			Size:        record.Size,
 			FilePath:    record.TargetPath,
+			FinalName:   record.FinalName,
 			Paused:      record.Paused,
 			ResumeData:  cloneResumeData(record.ResumeData),
 			Handler:     disk.NewDesktopFileHandler(record.TargetPath),

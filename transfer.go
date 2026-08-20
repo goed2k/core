@@ -40,6 +40,7 @@ type Transfer struct {
 	size               int64
 	numPieces          int
 	filePath           string
+	finalName          string
 	fileComment        string
 	stat               Statistics
 	closedStat         Statistics
@@ -78,6 +79,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		size:               atp.Size,
 		numPieces:          int(DivCeil(atp.Size, PieceSize)),
 		filePath:           atp.FilePath,
+		finalName:          strings.TrimSpace(atp.FinalName),
 		fileComment:        strings.TrimSpace(atp.FileComment),
 		stat:               NewStatistics(),
 		closedStat:         NewStatistics(),
@@ -162,6 +164,9 @@ func (t *Transfer) GetFile() *os.File {
 }
 
 func (t *Transfer) FileName() string {
+	if t != nil && t.finalName != "" {
+		return t.finalName
+	}
 	path := t.GetFilePath()
 	if path == "" {
 		return t.hash.String()
@@ -907,6 +912,10 @@ func (t *Transfer) finished() {
 	}
 	t.connections = nil
 	t.state = Finished
+	if t.handler != nil {
+		_ = t.handler.Close()
+	}
+	t.promoteEmuleTempPartIfNeeded()
 	if t.session != nil {
 		t.session.SubmitDiskTask(NewAsyncRelease(t, false))
 		t.session.tryAddCompletedTransferToSharedStore(t)
@@ -915,6 +924,31 @@ func (t *Transfer) finished() {
 		t.session.PublishTransferToKADV6(t)
 	}
 	t.markResumeDirty()
+}
+
+func (t *Transfer) promoteEmuleTempPartIfNeeded() {
+	if t == nil || t.session == nil || !t.session.settings.UseEmuleTempLayout {
+		return
+	}
+	src := t.GetFilePath()
+	if !isEmuleTempPartPath(src) {
+		return
+	}
+	name := t.finalName
+	if name == "" {
+		return
+	}
+	destDir := filepath.Dir(src)
+	if incoming := strings.TrimSpace(t.session.settings.IncomingDir); incoming != "" {
+		destDir = incoming
+	}
+	dest, err := promoteEmulePartFile(src, destDir, name, t.size)
+	if err != nil {
+		debugPeerf("transfer %s promote part failed: %v", t.hash.String(), err)
+		return
+	}
+	t.filePath = dest
+	t.handler = disk.NewDesktopFileHandler(dest)
 }
 
 func (t *Transfer) AsyncRestoreBlock(block data.PieceBlock) {

@@ -13,12 +13,14 @@ type AddTransferParams struct {
 	CreateTime   int64
 	Size         int64
 	FilePath     string
-	FileComment  string
-	Paused       bool
-	ResumeData   *protocol.TransferResumeData
-	Handler      disk.FileHandler
-	PieceHashes  []protocol.Hash
-	HttpSources  []string
+	// FinalName 是完成后的显示/落盘文件名（不含目录）。临时布局下 NNN.part 完成后用它重命名。
+	FinalName   string
+	FileComment string
+	Paused      bool
+	ResumeData  *protocol.TransferResumeData
+	Handler     disk.FileHandler
+	PieceHashes []protocol.Hash
+	HttpSources []string
 }
 
 func NewAddTransferParamsFromFile(h protocol.Hash, createTime int64, size int64, file *os.File, paused bool) AddTransferParams {

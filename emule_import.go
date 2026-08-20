@@ -145,6 +145,9 @@ func ApplyEmulePreferences(settings *Settings, prefs EmulePreferences) {
 	if prefs.TempDir != "" {
 		settings.UseEmuleTempLayout = true
 	}
+	if prefs.IncomingDir != "" {
+		settings.IncomingDir = prefs.IncomingDir
+	}
 	if prefs.AllocFull {
 		settings.PreallocateDiskSpace = true
 	}

@@ -49,7 +49,9 @@ type Settings struct {
 	IdentityKeyPath         string
 	Categories              []Category
 	UseEmuleTempLayout      bool
-	PartialKadPublish       bool
+	// IncomingDir 是 eMule 临时布局完成后的目标目录。空则改到 NNN.part 所在目录。
+	IncomingDir       string
+	PartialKadPublish bool
 	// PreallocateDiskSpace 为 true 时，创建任务会把数据文件扩展到完整 Size。
 	// Linux 上再 fallocate 尽量占盘；Windows 上再设置 NTFS FileAllocationInfo。
 	// 其他系统仅 Truncate，不保证实际占盘。与 UseSparseFiles 同时打开时以稀疏为准。
