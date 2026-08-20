@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -169,18 +168,12 @@ func TestInitClientConfigWinsOverRestoredSettings(t *testing.T) {
 		t.Fatalf("init second: %v", err)
 	}
 	defer client2.Close()
-	if err := client2.SaveState(""); err != nil {
-		t.Fatal(err)
+	snap := client2.PersistableSettings()
+	if snap.UseSparseFiles {
+		t.Fatal("config should win over restored sparse flag")
 	}
-	raw, err := os.ReadFile(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(raw, []byte(`"use_sparse_files": false`)) {
-		t.Fatalf("config should win over restored sparse flag: %s", raw)
-	}
-	if !bytes.Contains(raw, []byte(`"max_download_rate_kb": 99`)) {
-		t.Fatalf("config should win over restored rate: %s", raw)
+	if snap.MaxDownloadRateKB != 99 {
+		t.Fatalf("config should win over restored rate: %d", snap.MaxDownloadRateKB)
 	}
 }
 

@@ -23,7 +23,7 @@ import "github.com/goed2k/core"
 
 1. `settings := goed2k.NewSettings()`，按需修改端口、名称等。  
 2. `client := goed2k.NewClient(settings)`。  
-3. 可选：`client.SetStatePath("state.json")` 或 `SetStateStore(...)`，再 `LoadState` 恢复任务。  
+3. 可选：`client.SetStatePath("state.json")` 或 `SetStateStore(...)`，再 `LoadState` 恢复任务。若本次进程已有 Settings，调用 `OverlayPersistableSettings(settings)`，避免旧 state 覆盖当前配置。`bootstrap.InitClient` 会代为覆盖。
 4. `client.Start()` — 启动内部循环（监听、定时器、I/O）。  
 5. `Connect` / `ConnectServers` 连接 ED2K 服务器；若用 DHT：`EnableDHT()`、`LoadDHTNodesDat`、`AddDHTBootstrapNodes` 等。  
 6. `AddLink` / `AddTransfer` 添加任务。  
@@ -112,9 +112,11 @@ import "github.com/goed2k/core"
 | `SetStatePath(path string)` | 使用内置 JSON 文件存储。 |
 | `SetStateStore(ClientStateStore)` | 自定义存储（需实现 `Load`/`Save`）。 |
 | `StatePath() string` | 当前文件路径（若使用文件存储）。 |
-| `LoadState(path string) error` | 从路径加载（与 `SetStatePath` 配合）。接受状态版本 1–8（含曾跳过的 5/6）；v8 恢复磁盘/Web/速率等策略子集。`Logger`、端口、DHT 开关等过程字段不恢复。 |
+| `LoadState(path string) error` | 从路径加载（与 `SetStatePath` 配合）。接受状态版本 0–8。本仓库从未发布独立 schema 5/6（从 4 跳到 7），现按与 v7 兼容的可叠加 JSON 升级。v8 恢复磁盘/Web/速率等策略子集；无 `settings` 的 v7 保持构造时 Settings。`Logger`、端口、DHT 开关等过程字段不恢复。 |
 | `SaveState(path string) error` | 保存到路径。 |
-| `SetAutoSaveInterval(d time.Duration)` | 自动保存间隔（内部循环触发）。 |
+| `SetAutoSaveInterval(d time.Duration)` | 自动保存间隔（内部循环触发）。失败会记入 `LastAutoSaveError()` 并打 Warn，成功后清除。 |
+| `LastAutoSaveError() error` | 最近一次自动保存错误；成功后为 `nil`。 |
+| `OverlayPersistableSettings(Settings)` | 用本次进程配置覆盖可持久化策略。`bootstrap.InitClient` 在 `LoadState` 之后调用，保证 CLI/env 优先于旧 state。嵌入方若自行 `LoadState`，也应在之后覆盖，避免旧 state 压过当前配置。 |
 
 ### 其他
 

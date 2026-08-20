@@ -15,9 +15,8 @@ import (
 
 const clientStateVersion = 8
 
-// acceptedClientStateVersions 是可迁移的历史版本。5/6 曾被旧接受列表跳过，
-// JSON 形状与 7 兼容，现统一升到当前版本。
-var acceptedClientStateVersions = []int{1, 2, 3, 4, 5, 6, 7, 8}
+// 本仓库从未发布过独立的状态 schema 5/6（从 4 直接跳到 7）。
+// 它们与 v4–v7 同为可叠加 JSON，按当前版本兼容加载。
 
 type ClientCategoryState struct {
 	Name          string `json:"name"`
@@ -315,7 +314,7 @@ func (c *Client) applyState(state *ClientState) error {
 		return err
 	}
 	if state.Settings != nil {
-		applyPersistableSettings(&c.session.settings, *state.Settings)
+		c.applyPersistableSettingsLive(*state.Settings)
 	}
 	c.serverAddr = state.ServerAddress
 	if state.IdentityKeyPath != "" {
@@ -412,19 +411,8 @@ func migrateClientState(state *ClientState) error {
 	if state == nil {
 		return nil
 	}
-	if state.Version == 0 {
-		state.Version = clientStateVersion
-		return nil
-	}
-	accepted := false
-	for _, v := range acceptedClientStateVersions {
-		if state.Version == v {
-			accepted = true
-			break
-		}
-	}
-	if !accepted {
-		return fmt.Errorf("unsupported state version %d", state.Version)
+	if state.Version < 0 || state.Version > clientStateVersion {
+		return fmt.Errorf("unsupported state version %d (accepted 0–%d; versions 5 and 6 were never shipped as distinct schemas and migrate as v7-compatible)", state.Version, clientStateVersion)
 	}
 	state.Version = clientStateVersion
 	return nil
@@ -463,12 +451,25 @@ func applyPersistableSettings(dst *Settings, src ClientSettingsState) {
 	dst.MaxUploadRateKB = src.MaxUploadRateKB
 }
 
+// PersistableSettings 返回当前会写入 state 的策略子集。
+func (c *Client) PersistableSettings() ClientSettingsState {
+	if c == nil || c.session == nil {
+		return ClientSettingsState{}
+	}
+	return persistableSettingsFrom(c.session.settings)
+}
+
 // OverlayPersistableSettings 用 src 覆盖当前可持久化策略（bootstrap/CLI 在 LoadState 之后调用，保证进程配置胜出）。
 func (c *Client) OverlayPersistableSettings(src Settings) {
 	if c == nil || c.session == nil {
 		return
 	}
-	applyPersistableSettings(&c.session.settings, persistableSettingsFrom(src))
+	c.applyPersistableSettingsLive(persistableSettingsFrom(src))
+}
+
+func (c *Client) applyPersistableSettingsLive(src ClientSettingsState) {
+	applyPersistableSettings(&c.session.settings, src)
+	c.session.ConfigureSession(c.session.settings)
 }
 
 func cloneResumeData(src *protocol.TransferResumeData) *protocol.TransferResumeData {

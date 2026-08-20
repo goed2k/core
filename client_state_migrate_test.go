@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,8 +24,13 @@ func TestMigrateClientStateAcceptsHistoricalVersions(t *testing.T) {
 func TestMigrateClientStateRejectsUnknownVersion(t *testing.T) {
 	t.Parallel()
 	st := &ClientState{Version: 99}
-	if err := migrateClientState(st); err == nil {
+	err := migrateClientState(st)
+	if err == nil {
 		t.Fatal("expected unsupported version 99")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "99") || !strings.Contains(msg, "never shipped") {
+		t.Fatalf("error should name the version and 5/6 policy: %v", err)
 	}
 }
 
@@ -112,6 +118,63 @@ func TestLoadStateMigratesVersion5And6(t *testing.T) {
 		if got.Version != clientStateVersion {
 			t.Fatalf("v%d resaved as %d", v, got.Version)
 		}
+	}
+}
+
+func TestLoadStateVersion7WithoutSettingsKeepsConstructor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	legacy := ClientState{Version: 7, ServerAddress: "8.8.8.8:4661"}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.UseSparseFiles = true
+	settings.EnableWebDownload = false
+	settings.MaxDownloadRateKB = 77
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	if err := client.LoadState(path); err != nil {
+		t.Fatalf("load v7: %v", err)
+	}
+	if client.ServerAddress() != "8.8.8.8:4661" {
+		t.Fatalf("server %q", client.ServerAddress())
+	}
+	got := persistableSettingsFrom(client.session.settings)
+	if !got.UseSparseFiles || got.EnableWebDownload || got.MaxDownloadRateKB != 77 {
+		t.Fatalf("v7 without settings must keep constructor policy: %#v", got)
+	}
+}
+
+func TestLoadStateAppliesDownloadLimiter(t *testing.T) {
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.MaxDownloadRateKB = 64
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := client.SaveState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	other := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, other)
+	if err := other.LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+	if other.session.downloadLimiter == nil {
+		t.Fatal("expected download limiter")
+	}
+	other.session.downloadLimiter.mu.Lock()
+	rate := other.session.downloadLimiter.rateBps
+	other.session.downloadLimiter.mu.Unlock()
+	if rate != 64*1024 {
+		t.Fatalf("limiter rateBps=%v, want %d", rate, 64*1024)
 	}
 }
 
