@@ -79,6 +79,111 @@ func TestImportGoed2kJSONPartMet(t *testing.T) {
 	}
 }
 
+func TestResumeFromGapsKeepsPartialPieceBlocks(t *testing.T) {
+	hash := protocol.EMule
+	hashes := []protocol.Hash{hash, hash}
+	fileSize := PieceSize * 2
+	// piece 0 完整；piece 1 仅前两个 BlockSize 已下载，其后为 gap。
+	gaps := []protocol.PartMetGap{{
+		Start: uint64(PieceSize + 2*BlockSize),
+		End:   uint64(fileSize),
+	}}
+	resume := resumeFromGaps(fileSize, hashes, gaps)
+	if resume == nil || resume.Pieces.Len() != 2 {
+		t.Fatal("expected 2-piece resume")
+	}
+	if !resume.Pieces.GetBit(0) {
+		t.Fatal("无 gap 的 piece 0 应标记完成")
+	}
+	if resume.Pieces.GetBit(1) {
+		t.Fatal("仍有 gap 的 piece 1 不得标记完成")
+	}
+	if len(resume.DownloadedBlocks) != 2 {
+		t.Fatalf("piece 1 应保留 2 个完整块，got %d %+v", len(resume.DownloadedBlocks), resume.DownloadedBlocks)
+	}
+	if resume.DownloadedBlocks[0] != data.NewPieceBlock(1, 0) || resume.DownloadedBlocks[1] != data.NewPieceBlock(1, 1) {
+		t.Fatalf("unexpected blocks %+v", resume.DownloadedBlocks)
+	}
+	wantDone := uint64(PieceSize + 2*BlockSize)
+	if got := transferredFromResume(fileSize, resume); got != wantDone {
+		t.Fatalf("transferred %d want %d", got, wantDone)
+	}
+}
+
+func TestResumeFromGapsSkipsPartialTrailingBlock(t *testing.T) {
+	hash := protocol.EMule
+	fileSize := PieceSize
+	// 只覆盖第一个块的一半：不能把未完成块算进去。
+	gaps := []protocol.PartMetGap{{
+		Start: uint64(BlockSize / 2),
+		End:   uint64(fileSize),
+	}}
+	resume := resumeFromGaps(fileSize, []protocol.Hash{hash}, gaps)
+	if resume.Pieces.GetBit(0) {
+		t.Fatal("半块不得把 piece 标完成")
+	}
+	if len(resume.DownloadedBlocks) != 0 {
+		t.Fatalf("半块不得进入 DownloadedBlocks: %+v", resume.DownloadedBlocks)
+	}
+}
+
+func TestResumeFromGapsMultipleGapsInOnePiece(t *testing.T) {
+	hash := protocol.EMule
+	fileSize := PieceSize
+	// 块 1 缺失，块 0 与块 2 完整。
+	gaps := []protocol.PartMetGap{{
+		Start: uint64(BlockSize),
+		End:   uint64(2 * BlockSize),
+	}}
+	resume := resumeFromGaps(fileSize, []protocol.Hash{hash}, gaps)
+	if resume.Pieces.GetBit(0) {
+		t.Fatal("中间有 gap 的 piece 不得标完成")
+	}
+	got := map[int]bool{}
+	for _, b := range resume.DownloadedBlocks {
+		if b.PieceIndex != 0 {
+			t.Fatalf("unexpected piece %d", b.PieceIndex)
+		}
+		got[b.PieceBlock] = true
+	}
+	if !got[0] || got[1] || !got[2] {
+		t.Fatalf("expected blocks 0 and 2 only, got %+v", resume.DownloadedBlocks)
+	}
+}
+
+func TestExportImportEmulePartMetPreservesPartialBlocks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.avi")
+	hash := protocol.EMule
+	resume := &protocol.TransferResumeData{
+		Hashes: []protocol.Hash{hash, hash},
+		Pieces: protocol.NewBitField(2),
+		DownloadedBlocks: []data.PieceBlock{
+			data.NewPieceBlock(1, 0),
+			data.NewPieceBlock(1, 1),
+		},
+	}
+	resume.Pieces.SetBit(0)
+	if err := ExportPartMet(path, PartMetInfo{
+		Hash:     hash,
+		FileSize: PieceSize * 2,
+		Filename: "movie.avi",
+		Resume:   resume,
+	}); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	got, err := ImportPartMet(path)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if got.Resume == nil || !got.Resume.Pieces.GetBit(0) || got.Resume.Pieces.GetBit(1) {
+		t.Fatalf("pieces %+v", got.Resume.Pieces.Bits())
+	}
+	if len(got.Resume.DownloadedBlocks) != 2 {
+		t.Fatalf("partial blocks lost: %+v", got.Resume.DownloadedBlocks)
+	}
+}
+
 func TestGapsFromResumePartialPiece(t *testing.T) {
 	resume := &protocol.TransferResumeData{
 		Hashes: []protocol.Hash{protocol.EMule},
