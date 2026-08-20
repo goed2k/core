@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `9d7487a`（2026-08-20 审查，含 Server Login 官方 CryptLayer 能力位）。
+- **基线**：`main` 分支提交 `247ae92`（2026-08-20 审查，含跨连接上传队列身份与 Server Login 官方 CryptLayer 能力位）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
