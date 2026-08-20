@@ -155,6 +155,15 @@ func (h TransferHandle) PieceSnapshots() []PieceSnapshot {
 	return h.transfer.PieceSnapshots()
 }
 
+func (h TransferHandle) HttpSources() []string {
+	if h.transfer == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.transfer.HttpSources()
+}
+
 func (h TransferHandle) NeedResumeDataSave() bool {
 	if h.transfer == nil {
 		return false

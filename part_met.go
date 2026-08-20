@@ -115,8 +115,11 @@ func exportPartMetJSON(path string, info PartMetInfo) error {
 }
 
 // ImportPartMet 自动识别 eMule 二进制或 goed2k JSON .part.met。
+// 导入前会尝试恢复未完成的原子写出（合法 .tmp 提升，损坏 .tmp 删除，不覆盖已有合法文件）。
 func ImportPartMet(path string) (PartMetInfo, error) {
 	target := partMetPath(path)
+	recoverPartMetSidecar(target)
+	recoverPartMetSidecar(target + ".json")
 	raw, err := os.ReadFile(target)
 	if err != nil {
 		return PartMetInfo{}, err
@@ -365,13 +368,45 @@ func writePartMetAtomic(target string, raw []byte) error {
 	}
 	tmp := target + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, target); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
+	if err := replaceFile(tmp, target); err != nil {
+		// 保留完整 tmp，供下次导入/写出时 recover。
+		return err
+	}
 	return nil
+}
+
+func replaceFile(tmp, target string) error {
+	if err := os.Rename(tmp, target); err == nil {
+		return nil
+	}
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(tmp, target)
+}
+
+// recoverPartMetSidecar 处理崩溃留下的 <file>.tmp：
+// 目标已是合法 .part.met 则丢掉过期 tmp；目标缺失或损坏且 tmp 可解析则提升 tmp。
+func recoverPartMetSidecar(target string) {
+	tmp := target + ".tmp"
+	if raw, err := os.ReadFile(target); err == nil {
+		if _, err := ParsePartMetBytes(raw); err == nil {
+			_ = os.Remove(tmp)
+			return
+		}
+	}
+	raw, err := os.ReadFile(tmp)
+	if err != nil {
+		return
+	}
+	if _, err := ParsePartMetBytes(raw); err != nil {
+		_ = os.Remove(tmp)
+		return
+	}
+	_ = replaceFile(tmp, target)
 }
 
 func partMetPath(path string) string {

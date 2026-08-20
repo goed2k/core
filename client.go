@@ -23,6 +23,9 @@ import (
 
 var ErrClientStopped = errors.New("client stopped")
 
+// defaultPartMetFlushInterval 下载中自动写出 .part.met 的最小间隔。
+const defaultPartMetFlushInterval = 15 * time.Second
+
 var remoteResourceHTTPClient = &http.Client{
 	Timeout: 30 * time.Second,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -34,24 +37,27 @@ var remoteResourceHTTPClient = &http.Client{
 }
 
 type Client struct {
-	session           *Session
-	tickInterval      time.Duration
-	statusInterval    time.Duration
-	autoSaveTick      time.Duration
-	stopCh            chan struct{}
-	doneCh            chan struct{}
-	startOnce         sync.Once
-	closeOnce         sync.Once
-	started           bool
-	serverAddr        string
-	stateStore        ClientStateStore
-	listenersMu       sync.Mutex
-	listeners         map[int]chan ClientStatusEvent
-	nextListenerID    int
-	progressMu        sync.Mutex
-	progressListeners map[int]chan TransferProgressEvent
-	nextProgressID    int
-	lastProgress      map[protocol.Hash]TransferProgressSnapshot
+	session              *Session
+	tickInterval         time.Duration
+	statusInterval       time.Duration
+	autoSaveTick         time.Duration
+	partMetFlushInterval time.Duration
+	partMetFlushMu       sync.Mutex
+	lastPartMetFlush     map[protocol.Hash]time.Time
+	stopCh               chan struct{}
+	doneCh               chan struct{}
+	startOnce            sync.Once
+	closeOnce            sync.Once
+	started              bool
+	serverAddr           string
+	stateStore           ClientStateStore
+	listenersMu          sync.Mutex
+	listeners            map[int]chan ClientStatusEvent
+	nextListenerID       int
+	progressMu           sync.Mutex
+	progressListeners    map[int]chan TransferProgressEvent
+	nextProgressID       int
+	lastProgress         map[protocol.Hash]TransferProgressSnapshot
 }
 
 func NewClient(settings Settings) *Client {
@@ -59,12 +65,14 @@ func NewClient(settings Settings) *Client {
 		logx.SetLogger(settings.Logger)
 	}
 	return &Client{
-		session:        NewSession(settings),
-		tickInterval:   100 * time.Millisecond,
-		statusInterval: time.Second,
-		autoSaveTick:   5 * time.Second,
-		stopCh:         make(chan struct{}),
-		doneCh:         make(chan struct{}),
+		session:              NewSession(settings),
+		tickInterval:         100 * time.Millisecond,
+		statusInterval:       time.Second,
+		autoSaveTick:         5 * time.Second,
+		partMetFlushInterval: defaultPartMetFlushInterval,
+		lastPartMetFlush:     make(map[protocol.Hash]time.Time),
+		stopCh:               make(chan struct{}),
+		doneCh:               make(chan struct{}),
 	}
 }
 
@@ -433,8 +441,12 @@ func (c *Client) Stop() error {
 			c.session.DisconnectFrom()
 			c.session.CloseListener()
 		}
+		flushErr := c.flushPartMet(time.Now(), true)
 		if c.stateStore != nil {
 			err = c.SaveState("")
+		}
+		if err == nil {
+			err = flushErr
 		}
 	})
 	return err
@@ -538,6 +550,13 @@ func (c *Client) SetAutoSaveInterval(interval time.Duration) {
 	c.autoSaveTick = interval
 }
 
+// SetPartMetFlushInterval 设置自动写出 .part.met 的最小间隔；0 表示每次脏进度都写。
+func (c *Client) SetPartMetFlushInterval(interval time.Duration) {
+	c.partMetFlushMu.Lock()
+	c.partMetFlushInterval = interval
+	c.partMetFlushMu.Unlock()
+}
+
 func (c *Client) ServerAddress() string {
 	return c.serverAddr
 }
@@ -582,6 +601,7 @@ func (c *Client) AddLink(linkValue, outputDir string) (TransferHandle, string, e
 		logx.Debug("initial source discovery requested", "hash", link.Hash.String(), "requested", requested)
 	}
 	_ = c.saveStateIfConfigured()
+	_ = c.flushOnePartMet(handle, time.Now(), true)
 	c.emitStatusUpdate()
 	c.emitTransferProgressUpdate(true)
 	return handle, targetPath, err
@@ -756,6 +776,7 @@ func (c *Client) AddTransfer(atp AddTransferParams) (TransferHandle, error) {
 	handle, err := c.session.AddTransferParams(atp)
 	if err == nil {
 		_ = c.saveStateIfConfigured()
+		_ = c.flushOnePartMet(handle, time.Now(), true)
 		c.emitStatusUpdate()
 		c.emitTransferProgressUpdate(true)
 	}
@@ -821,6 +842,9 @@ func (c *Client) RemoveTransfer(hash protocol.Hash, deleteFile bool) error {
 	if err := c.session.RemoveTransfer(hash, deleteFile); err != nil {
 		return err
 	}
+	c.partMetFlushMu.Lock()
+	delete(c.lastPartMetFlush, hash)
+	c.partMetFlushMu.Unlock()
 	if err := c.saveStateIfConfigured(); err != nil {
 		return err
 	}
@@ -869,6 +893,54 @@ func (c *Client) BanPeer(endpoint protocol.Endpoint) error {
 	return c.saveStateIfConfigured()
 }
 
+// FlushPartMet 按节流写出各任务旁注 .part.met。force 时忽略间隔并写出所有有路径的任务。
+func (c *Client) FlushPartMet(force bool) error {
+	return c.flushPartMet(time.Now(), force)
+}
+
+func (c *Client) flushPartMet(now time.Time, force bool) error {
+	if c == nil || c.session == nil {
+		return nil
+	}
+	var firstErr error
+	for _, handle := range c.Transfers() {
+		if err := c.flushOnePartMet(handle, now, force); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (c *Client) flushOnePartMet(handle TransferHandle, now time.Time, force bool) error {
+	if !handle.IsValid() {
+		return nil
+	}
+	if handle.GetFilePath() == "" {
+		return nil
+	}
+	if !force && !handle.NeedResumeDataSave() {
+		return nil
+	}
+	hash := handle.GetHash()
+	c.partMetFlushMu.Lock()
+	interval := c.partMetFlushInterval
+	last := c.lastPartMetFlush[hash]
+	c.partMetFlushMu.Unlock()
+	if !force && interval > 0 && !last.IsZero() && now.Sub(last) < interval {
+		return nil
+	}
+	if err := c.ExportPartMetForTransfer(hash); err != nil {
+		return err
+	}
+	c.partMetFlushMu.Lock()
+	if c.lastPartMetFlush == nil {
+		c.lastPartMetFlush = make(map[protocol.Hash]time.Time)
+	}
+	c.lastPartMetFlush[hash] = now
+	c.partMetFlushMu.Unlock()
+	return nil
+}
+
 func (c *Client) ExportPartMetForTransfer(hash protocol.Hash) error {
 	handle := c.FindTransfer(hash)
 	if !handle.IsValid() {
@@ -880,10 +952,10 @@ func (c *Client) ExportPartMetForTransfer(hash protocol.Hash) error {
 	}
 	return ExportPartMet(path, PartMetInfo{
 		Hash:        handle.GetHash(),
-		FileSize:    handle.transfer.Size(),
+		FileSize:    handle.GetSize(),
 		Filename:    filepath.Base(path),
 		Resume:      handle.GetResumeData(),
-		HttpSources: handle.transfer.HttpSources(),
+		HttpSources: handle.HttpSources(),
 	})
 }
 
@@ -921,6 +993,7 @@ func (c *Client) loop() {
 			lastTick = now
 			UpdateCachedTime()
 			c.session.SecondTick(CurrentTime(), elapsed.Milliseconds())
+			_ = c.flushPartMet(now, false)
 			if c.stateStore != nil && c.autoSaveTick > 0 && now.Sub(lastSave) >= c.autoSaveTick {
 				_ = c.SaveState("")
 				lastSave = now

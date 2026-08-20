@@ -6,9 +6,13 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 下载中自动维护 eMule 二进制 `.part.met`：任务创建、脏进度节流和 `Stop` 时原子写出；崩溃留下的合法 `.tmp` 可在导入时恢复。
+
 ### 修复
 
-- 二进制 `.part.met` 导入会把未完成分片中已下完的整块写入 `DownloadedBlocks`，不再只保留完全没有 gap 的 piece。半块仍丢弃；下载中仍不自动写出 `.part.met`。
+- 二进制 `.part.met` 导入会把未完成分片中已下完的整块写入 `DownloadedBlocks`，不再只保留完全没有 gap 的 piece。半块仍丢弃。
 
 ## [0.1.3] - 2026-08-02
 
