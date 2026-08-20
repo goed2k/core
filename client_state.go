@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/disk"
@@ -51,7 +52,8 @@ type ClientState struct {
 
 // ClientSettingsState 是 Settings 中会跨重启保留的策略子集。
 // 刻意不持久化：Logger、UserAgent、Mod/协议版本、端口与 DHT 开关（由 bootstrap/CLI 或 DHT 快照拥有）、
-// 连接池/超时等过程调优字段。
+// 连接池/超时等过程调优字段。路径字段（IncomingDir、WebCacheDir）会落盘；
+// Overlay 时空字符串不覆盖 LoadState 已恢复的非空值。
 type ClientSettingsState struct {
 	UseEmuleTempLayout      bool   `json:"use_emule_temp_layout"`
 	PartialKadPublish       bool   `json:"partial_kad_publish"`
@@ -61,6 +63,7 @@ type ClientSettingsState struct {
 	MaxHttpSources          int    `json:"max_http_sources"`
 	MaxConcurrentHttpBlocks int    `json:"max_concurrent_http_blocks"`
 	WebCacheDir             string `json:"web_cache_dir,omitempty"`
+	IncomingDir             string `json:"incoming_dir,omitempty"`
 	HttpRequestTimeoutSec   int    `json:"http_request_timeout_sec"`
 	MaxDownloadRateKB       int    `json:"max_download_rate_kb"`
 	MaxUploadRateKB         int    `json:"max_upload_rate_kb"`
@@ -547,6 +550,7 @@ func persistableSettingsFrom(s Settings) ClientSettingsState {
 		MaxHttpSources:          s.MaxHttpSources,
 		MaxConcurrentHttpBlocks: s.MaxConcurrentHttpBlocks,
 		WebCacheDir:             s.WebCacheDir,
+		IncomingDir:             s.IncomingDir,
 		HttpRequestTimeoutSec:   s.HttpRequestTimeoutSec,
 		MaxDownloadRateKB:       s.MaxDownloadRateKB,
 		MaxUploadRateKB:         s.MaxUploadRateKB,
@@ -565,6 +569,7 @@ func applyPersistableSettings(dst *Settings, src ClientSettingsState) {
 	dst.MaxHttpSources = src.MaxHttpSources
 	dst.MaxConcurrentHttpBlocks = src.MaxConcurrentHttpBlocks
 	dst.WebCacheDir = src.WebCacheDir
+	dst.IncomingDir = src.IncomingDir
 	dst.HttpRequestTimeoutSec = src.HttpRequestTimeoutSec
 	dst.MaxDownloadRateKB = src.MaxDownloadRateKB
 	dst.MaxUploadRateKB = src.MaxUploadRateKB
@@ -579,11 +584,29 @@ func (c *Client) PersistableSettings() ClientSettingsState {
 }
 
 // OverlayPersistableSettings 用 src 覆盖当前可持久化策略（bootstrap/CLI 在 LoadState 之后调用，保证进程配置胜出）。
+// 路径字段（IncomingDir、WebCacheDir）若 src 为空，则保留 LoadState 已恢复的非空值，避免空 Config 冲掉导入/上次进程目录。
 func (c *Client) OverlayPersistableSettings(src Settings) {
 	if c == nil || c.session == nil {
 		return
 	}
-	c.applyPersistableSettingsLive(persistableSettingsFrom(src))
+	merged := persistableSettingsFrom(c.session.settings)
+	overlayPersistableSettings(&merged, persistableSettingsFrom(src))
+	c.applyPersistableSettingsLive(merged)
+}
+
+func overlayPersistableSettings(dst *ClientSettingsState, src ClientSettingsState) {
+	if dst == nil {
+		return
+	}
+	incoming := dst.IncomingDir
+	cache := dst.WebCacheDir
+	*dst = src
+	if strings.TrimSpace(src.IncomingDir) == "" {
+		dst.IncomingDir = incoming
+	}
+	if strings.TrimSpace(src.WebCacheDir) == "" {
+		dst.WebCacheDir = cache
+	}
 }
 
 func (c *Client) applyPersistableSettingsLive(src ClientSettingsState) {

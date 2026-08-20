@@ -117,7 +117,7 @@ import "github.com/goed2k/core"
 | `SetAutoSaveInterval(d time.Duration)` | 自动保存间隔（内部循环触发）。失败会记入 `LastAutoSaveError()` 并打 Warn，成功后清除。失败仍按该间隔重试，不会每个 tick 狂写。 |
 | `LastAutoSaveError() error` | 最近一次自动保存错误；成功后为 `nil`。 |
 | `PersistableSettings() ClientSettingsState` | 当前会写入 state 的策略子集。 |
-| `OverlayPersistableSettings(Settings)` | 用本次进程配置覆盖可持久化策略，并同步 `downloadLimiter`。`bootstrap.InitClient` 在 `LoadState` 之后调用，保证 CLI/env 优先于旧 state。嵌入方若自行 `LoadState`，也应在之后覆盖，避免旧 state 压过当前配置。 |
+| `OverlayPersistableSettings(Settings)` | 用本次进程配置覆盖可持久化策略，并同步 `downloadLimiter`。`bootstrap.InitClient` 在 `LoadState` 之后调用，保证 CLI/env 优先于旧 state。空 `IncomingDir` / `WebCacheDir` 不覆盖 LoadState 已恢复的非空值。嵌入方若自行 `LoadState`，也应在之后覆盖，避免旧 state 压过当前配置。 |
 
 ### 其他
 
