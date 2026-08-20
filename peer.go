@@ -19,6 +19,10 @@ type Peer struct {
 	Endpoint        protocol.Endpoint
 	remoteQueueRank uint16
 	inRemoteQueue   bool
+	remoteQueueFull bool
+	udpReaskPending bool
+	// UDPPort 来自 Hello CT_EMULE_UDPPORTS（0xF9）低 16 位，供标准 UDP ReAsk 使用。
+	UDPPort uint16
 	// ServerClientID 非零表示服务器来源的低 ID 用户 ID（Endpoint 的 IP 字段实为 client ID）。
 	ServerClientID int32
 	// DialAddr 可选；非 nil 时优先用于 TCP 拨号（如 KADV6 纯 IPv6 来源），与 Endpoint 可并存（IPv4 时常同步）。
@@ -43,7 +47,35 @@ func (p *Peer) markRemoteQueued(rank uint16, nextConnection int64) {
 	}
 	p.remoteQueueRank = rank
 	p.inRemoteQueue = true
+	p.remoteQueueFull = false
+	p.udpReaskPending = false
 	p.NextConnection = nextConnection
+}
+
+func (p *Peer) markRemoteQueueFull(nextConnection int64) {
+	if p == nil {
+		return
+	}
+	p.remoteQueueRank = 0
+	p.inRemoteQueue = true
+	p.remoteQueueFull = true
+	p.udpReaskPending = false
+	p.NextConnection = nextConnection
+}
+
+func (p *Peer) markRemoteFileNotFound(nextConnection int64) {
+	if p == nil {
+		return
+	}
+	p.remoteQueueRank = 0
+	p.inRemoteQueue = false
+	p.remoteQueueFull = false
+	p.udpReaskPending = false
+	p.NextConnection = nextConnection
+}
+
+func (p *Peer) RemoteQueueFull() bool {
+	return p != nil && p.remoteQueueFull
 }
 
 func (p *Peer) clearRemoteQueue() {
@@ -52,6 +84,8 @@ func (p *Peer) clearRemoteQueue() {
 	}
 	p.remoteQueueRank = 0
 	p.inRemoteQueue = false
+	p.remoteQueueFull = false
+	p.udpReaskPending = false
 	p.NextConnection = 0
 }
 

@@ -128,8 +128,10 @@ func (s *Session) serverStatUDPReadLoop(conn *net.UDPConn, stop <-chan struct{})
 				continue
 			}
 		}
-		if n >= 26 {
-			s.handleGlobServStatUDP(addr, buf[:n])
+		if n >= 2 {
+			copied := append([]byte(nil), buf[:n]...)
+			s.handleClientUDP(addr, copied)
+			s.handleGlobServStatUDP(addr, copied)
 		}
 	}
 }

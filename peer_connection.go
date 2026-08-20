@@ -131,6 +131,7 @@ type RemotePeerInfo struct {
 	SourceExchange2Ver byte
 	SecIdentVersion    int
 	SecIdentKeyFP      uint32
+	UDPPort            uint16
 }
 
 type PendingBlock struct {
@@ -418,6 +419,7 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 	mo := MiscOptions{
 		AICHVersion:        1,
 		UnicodeSupport:     1,
+		UDPVer:             clientUDPReaskVersion,
 		DataCompVer:        p.session.GetCompressionVersion(),
 		SourceExchange1Ver: 1,
 		NoViewSharedFiles:  1,
@@ -436,7 +438,7 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 			protocol.NewStringTag(0x01, p.session.GetClientName()),
 			protocol.NewStringTag(0x55, p.session.GetModName()),
 			protocol.NewUInt32Tag(0x11, uint32(p.session.GetAppVersion())),
-			protocol.NewUInt32Tag(0xF9, 0),
+			protocol.NewUInt32Tag(helloTagUDPPorts, p.session.helloUDPPortsValue()),
 			protocol.NewUInt32Tag(0xFB, uint32((clientSoftwareAMule<<24)|((p.session.GetModMajorVersion()&0x7f)<<17)|((p.session.GetModMinorVersion()&0x7f)<<10)|((p.session.GetModBuildVersion()&0x7f)<<7))),
 			protocol.NewUInt32Tag(0xFA, uint32(mo.IntValue())),
 			protocol.NewUInt32Tag(0xFE, uint32(mo2.Value)),
@@ -945,6 +947,7 @@ func (p *PeerConnection) HandleHelloAnswer(value *clientproto.HelloAnswer) {
 		p.endpoint.AssignEndpoint(value.Point)
 	}
 	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
+	p.persistRemoteUDPPort()
 	debugPeerf("peer %s <- HelloAnswer", p.endpoint.String())
 	p.markHelloInfoDone()
 	p.SendExtHello()
@@ -982,6 +985,7 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 		p.endpoint.AssignEndpoint(value.Point)
 	}
 	parseHelloTagList(&p.remotePeerInfo, &value.Properties)
+	p.persistRemoteUDPPort()
 	debugPeerf("peer %s <- Hello", p.endpoint.String())
 	if value.Point.Defined() && IsLowID(value.Point.IP()) {
 		p.session.tryAttachCallbackPeer(p, value.Point.IP())
@@ -992,6 +996,13 @@ func (p *PeerConnection) HandleClientHello(value *clientproto.Hello) {
 	}
 	p.markHelloInfoDone()
 	p.SendExtHello()
+}
+
+func (p *PeerConnection) persistRemoteUDPPort() {
+	if p == nil || p.remotePeerInfo.UDPPort == 0 || p.peerInfo == nil {
+		return
+	}
+	p.peerInfo.UDPPort = p.remotePeerInfo.UDPPort
 }
 
 func (p *PeerConnection) ActiveUploadSource() UploadableResource {
@@ -1660,6 +1671,7 @@ const (
 	helloTagVersion            = 0x11
 	helloTagModName            = 0x55
 	helloTagModVer             = 0xFB
+	helloTagUDPPorts           = 0xF9
 	helloTagMisc1              = 0xFA
 	helloTagMisc2              = 0xFE
 	helloTagSourceExchange2Ver = 0x3B
@@ -1712,6 +1724,10 @@ func parseHelloTagList(dst *RemotePeerInfo, props *protocol.TagList) {
 			if t.Type == protocol.TagTypeUint32 {
 				dst.ModNumber = int(t.UInt32)
 				dst.ModVersion = decodeHelloModComposite(t.UInt32)
+			}
+		case helloTagUDPPorts:
+			if t.Type == protocol.TagTypeUint32 {
+				dst.UDPPort = uint16(t.UInt32)
 			}
 		case helloTagMisc1:
 			if t.Type == protocol.TagTypeUint32 {
