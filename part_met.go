@@ -289,17 +289,41 @@ func resumeFromGaps(fileSize int64, pieceHashes []protocol.Hash, gaps []protocol
 		numPieces = int(DivCeil(fileSize, PieceSize))
 	}
 	bits := protocol.NewBitField(numPieces)
+	downloaded := make([]data.PieceBlock, 0)
 	for i := 0; i < numPieces; i++ {
 		start := uint64(int64(i) * PieceSize)
 		end := start + uint64(pieceByteLength(fileSize, i))
 		if !rangeOverlapsGaps(start, end, gaps) {
 			bits.SetBit(i)
+			continue
 		}
+		downloaded = append(downloaded, completedBlocksInPiece(fileSize, i, gaps)...)
 	}
 	return &protocol.TransferResumeData{
-		Hashes: append([]protocol.Hash(nil), pieceHashes...),
-		Pieces: bits,
+		Hashes:           append([]protocol.Hash(nil), pieceHashes...),
+		Pieces:           bits,
+		DownloadedBlocks: downloaded,
 	}
+}
+
+// completedBlocksInPiece 把 eMule gap 之外、且完整覆盖本实现 BlockSize 的块记入续传。
+// 不改 180/190 KiB 常量；只承认当前 BlockSize 下整块已下载的区间，尾片短块按 PieceBlock.Range 夹紧。
+func completedBlocksInPiece(fileSize int64, pieceIndex int, gaps []protocol.PartMetGap) []data.PieceBlock {
+	pieceLen := pieceByteLength(fileSize, pieceIndex)
+	if pieceLen <= 0 {
+		return nil
+	}
+	count := int(DivCeil(pieceLen, BlockSize))
+	out := make([]data.PieceBlock, 0, count)
+	for j := 0; j < count; j++ {
+		block := data.NewPieceBlock(pieceIndex, j)
+		r := block.Range(fileSize)
+		if r.Right <= r.Left || rangeOverlapsGaps(uint64(r.Left), uint64(r.Right), gaps) {
+			continue
+		}
+		out = append(out, block)
+	}
+	return out
 }
 
 func rangeOverlapsGaps(start, end uint64, gaps []protocol.PartMetGap) bool {
@@ -321,6 +345,15 @@ func transferredFromResume(fileSize int64, resume *protocol.TransferResumeData) 
 	for i := 0; i < numPieces; i++ {
 		if resume.Pieces.GetBit(i) {
 			done += uint64(pieceByteLength(fileSize, i))
+		}
+	}
+	for _, block := range resume.DownloadedBlocks {
+		if block.PieceIndex >= 0 && block.PieceIndex < numPieces && resume.Pieces.GetBit(block.PieceIndex) {
+			continue
+		}
+		r := block.Range(fileSize)
+		if r.Right > r.Left {
+			done += uint64(r.Right - r.Left)
 		}
 	}
 	return done

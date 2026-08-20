@@ -13,6 +13,15 @@ goed2k 通过 `ExportPartMet` 导出 **eMule/aMule 兼容的二进制** `<path>.
 
 二进制布局见 [aMule part.met 文档](https://amule-org.github.io/docs/developer/file-formats/part-met)。
 
+## 二进制导入语义
+
+`ImportPartMet` 解析 eMule gap（`[Start, End)` 缺失区间）后映射到本实现续传模型：
+
+- 完全不被 gap 覆盖的 piece 记入 `completed_pieces`。
+- 未完成 piece 中，按当前 `BlockSize`（190 KiB）整块已下载的区间记入 `downloaded_blocks`；尾片短块按实际文件长度夹紧。
+- 半块或被 gap 切开的块不计入（保守；180 KiB 统一后再评估不对齐尾部）。
+- 下载过程中不会自动写出 `.part.met`，需显式调用 `ExportPartMet`。日常续传仍走 `client_state.go`。
+
 ## JSON 旁注字段说明
 
 | 字段 | 类型 | 说明 |
