@@ -351,8 +351,8 @@ func putSearchTerms(dst *bytes.Buffer, terms []searchTerm, ops []byte) error {
 
 // parseSearchQuery 解析最小布尔查询：默认 AND；OR / NOT（或 -word）为二元算子。
 // 左结合，不支持括号。单独的前导算子忽略。
-// 普通词仍按原分词器切开点/下划线/连字符等，以便与 Kad 索引词对齐；
-// `-word` 的操作数只去边缘标点，避免把排除项拆成 AND。
+// 默认 AND 的普通词仍按原分词器切开点/下划线/连字符等，以便与 Kad 索引词对齐。
+// OR/NOT/`-word` 的操作数只去边缘标点、不再切开，避免 `NOT name.ext` 变成 NOT name AND ext。
 func parseSearchQuery(query string) (ops []byte, words []string) {
 	raw := strings.Fields(strings.TrimSpace(query))
 	pendingOp := byte(0)
@@ -397,6 +397,11 @@ func parseSearchQuery(query string) (ops []byte, words []string) {
 				continue
 			}
 			appendWord(word, searchBoolNOT, true)
+			continue
+		}
+		if hasPending {
+			word := strings.Trim(field, "()[]{}<>,._!?:;\\/\"")
+			appendWord(word, 0, false)
 			continue
 		}
 		for _, word := range splitSearchWord(field) {

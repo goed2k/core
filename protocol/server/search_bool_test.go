@@ -38,6 +38,17 @@ func TestParseSearchQuerySplitsPunctuationLikeOldTokenizer(t *testing.T) {
 	}
 }
 
+func TestParseSearchQueryKeepsBooleanOperandWhole(t *testing.T) {
+	t.Parallel()
+	ops, words := parseSearchQuery("foo OR title.mp3 NOT remix-live")
+	if len(words) != 3 || words[0] != "foo" || words[1] != "title.mp3" || words[2] != "remix-live" {
+		t.Fatalf("words %+v", words)
+	}
+	if len(ops) != 2 || ops[0] != searchBoolOR || ops[1] != searchBoolNOT {
+		t.Fatalf("ops %+v", ops)
+	}
+}
+
 func TestTokenizeSearchQuerySkipsNOTOperands(t *testing.T) {
 	t.Parallel()
 	got := TokenizeSearchQuery("foo NOT barbaz OR qux")
