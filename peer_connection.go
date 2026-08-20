@@ -56,32 +56,46 @@ type MiscOptions struct {
 	SupportsPreview     int
 }
 
+const (
+	aichVersionOffset       = 29
+	unicodeSupportOffset    = 28
+	udpVersionOffset        = 24
+	dataCompressionOffset   = 20
+	secureIdentOffset       = 16
+	sourceExchange1Offset   = 12
+	extendedRequestsOffset  = 8
+	acceptCommentOffset     = 4
+	noViewSharedFilesOffset = 2
+	multiPacketOffset       = 1
+	supportsPreviewOffset   = 0
+)
+
 func (m MiscOptions) IntValue() int {
-	return (m.AICHVersion << ((4 * 7) + 1)) |
-		(m.UnicodeSupport << 4 * 7) |
-		(m.UDPVer << 4 * 6) |
-		(m.DataCompVer << 4 * 5) |
-		(m.SupportSecIdent << 4 * 4) |
-		(m.SourceExchange1Ver << 4 * 3) |
-		(m.ExtendedRequestsVer << 4 * 2) |
-		(m.AcceptCommentVer << 4) |
-		(m.NoViewSharedFiles << 2) |
-		(m.MultiPacket << 1) |
-		m.SupportsPreview
+	return (m.AICHVersion << aichVersionOffset) |
+		(m.UnicodeSupport << unicodeSupportOffset) |
+		(m.UDPVer << udpVersionOffset) |
+		(m.DataCompVer << dataCompressionOffset) |
+		(m.SupportSecIdent << secureIdentOffset) |
+		(m.SourceExchange1Ver << sourceExchange1Offset) |
+		(m.ExtendedRequestsVer << extendedRequestsOffset) |
+		(m.AcceptCommentVer << acceptCommentOffset) |
+		(m.NoViewSharedFiles << noViewSharedFilesOffset) |
+		(m.MultiPacket << multiPacketOffset) |
+		(m.SupportsPreview << supportsPreviewOffset)
 }
 
 func (m *MiscOptions) Assign(value int) {
-	m.AICHVersion = (value >> (4*7 + 1)) & 0x07
-	m.UnicodeSupport = (value >> 4 * 7) & 0x01
-	m.UDPVer = (value >> 4 * 6) & 0x0f
-	m.DataCompVer = (value >> 4 * 5) & 0x0f
-	m.SupportSecIdent = (value >> 4 * 4) & 0x0f
-	m.SourceExchange1Ver = (value >> 4 * 3) & 0x0f
-	m.ExtendedRequestsVer = (value >> 4 * 2) & 0x0f
-	m.AcceptCommentVer = (value >> 4) & 0x0f
-	m.NoViewSharedFiles = (value >> 2) & 0x01
-	m.MultiPacket = (value >> 1) & 0x01
-	m.SupportsPreview = value & 0x01
+	m.AICHVersion = (value >> aichVersionOffset) & 0x07
+	m.UnicodeSupport = (value >> unicodeSupportOffset) & 0x01
+	m.UDPVer = (value >> udpVersionOffset) & 0x0f
+	m.DataCompVer = (value >> dataCompressionOffset) & 0x0f
+	m.SupportSecIdent = (value >> secureIdentOffset) & 0x0f
+	m.SourceExchange1Ver = (value >> sourceExchange1Offset) & 0x0f
+	m.ExtendedRequestsVer = (value >> extendedRequestsOffset) & 0x0f
+	m.AcceptCommentVer = (value >> acceptCommentOffset) & 0x0f
+	m.NoViewSharedFiles = (value >> noViewSharedFilesOffset) & 0x01
+	m.MultiPacket = (value >> multiPacketOffset) & 0x01
+	m.SupportsPreview = (value >> supportsPreviewOffset) & 0x01
 }
 
 type MiscOptions2 struct {
@@ -98,7 +112,7 @@ const (
 func (m MiscOptions2) SupportCaptcha() bool        { return ((m.Value >> captchaOffset) & 0x01) == 1 }
 func (m MiscOptions2) SupportSourceExt2() bool     { return ((m.Value >> srcExtOffset) & 0x01) == 1 }
 func (m MiscOptions2) SupportExtMultipacket() bool { return ((m.Value >> multipOffset) & 0x01) == 1 }
-func (m MiscOptions2) SupportLargeFiles() bool     { return ((m.Value >> largeFileOffset) & 0x01) == 0 }
+func (m MiscOptions2) SupportLargeFiles() bool     { return ((m.Value >> largeFileOffset) & 0x01) == 1 }
 func (m *MiscOptions2) SetCaptcha()                { m.Value |= 1 << captchaOffset }
 func (m *MiscOptions2) SetSourceExt2()             { m.Value |= 1 << srcExtOffset }
 func (m *MiscOptions2) SetExtMultipacket()         { m.Value |= 1 << multipOffset }
@@ -406,8 +420,8 @@ func (p *PeerConnection) PrepareHelloAnswer() clientproto.HelloAnswer {
 		SourceExchange1Ver: 1,
 		NoViewSharedFiles:  1,
 	}
+	// Hello 只宣告已有完整处理路径的能力。
 	var mo2 MiscOptions2
-	mo2.SetCaptcha()
 	mo2.SetLargeFiles()
 	mo2.SetSourceExt2()
 	if p.session.settings.EnableSecIdent && p.session.Identity().Available() {
