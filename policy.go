@@ -38,6 +38,13 @@ func (p Policy) maxFailCount() int {
 	return 20
 }
 
+func (p Policy) maxPeerListSize() int {
+	if p.transfer != nil && p.transfer.session != nil && p.transfer.session.settings.MaxPeerListSize > 0 {
+		return p.transfer.session.settings.MaxPeerListSize
+	}
+	return MaxPeerListSize
+}
+
 func (p Policy) IsConnectCandidate(pe Peer) bool {
 	if pe.Connection != nil || !pe.Connectable {
 		return false
@@ -73,9 +80,10 @@ func (p Policy) Get(endpoint protocol.Endpoint) *Peer {
 }
 
 func (p *Policy) AddPeer(peer Peer) (bool, error) {
-	if MaxPeerListSize != 0 && len(p.peers) >= MaxPeerListSize {
+	limit := p.maxPeerListSize()
+	if limit != 0 && len(p.peers) >= limit {
 		p.ErasePeers()
-		if len(p.peers) >= MaxPeerListSize {
+		if len(p.peers) >= limit {
 			return false, NewError(PeerLimitExceeded)
 		}
 	}
@@ -89,13 +97,14 @@ func (p *Policy) AddPeer(peer Peer) (bool, error) {
 }
 
 func (p *Policy) ErasePeers() {
-	if MaxPeerListSize == 0 || len(p.peers) == 0 {
+	limit := p.maxPeerListSize()
+	if limit == 0 || len(p.peers) == 0 {
 		return
 	}
 	eraseCandidate := -1
 	roundRobin := p.rnd.Intn(len(p.peers))
-	lowWatermark := MaxPeerListSize * 95 / 100
-	if lowWatermark == MaxPeerListSize {
+	lowWatermark := limit * 95 / 100
+	if lowWatermark == limit {
 		lowWatermark--
 	}
 	for iterations := minInt(len(p.peers), 300); iterations > 0; iterations-- {
@@ -165,6 +174,7 @@ func (p Policy) ComparePeerErase(lhs, rhs Peer) bool {
 func (p *Policy) FindConnectCandidate(sessionTime int64) *Peer {
 	candidate := -1
 	eraseCandidate := -1
+	limit := p.maxPeerListSize()
 	if p.roundRobin >= len(p.peers) {
 		p.roundRobin = 0
 	}
@@ -174,7 +184,7 @@ func (p *Policy) FindConnectCandidate(sessionTime int64) *Peer {
 		}
 		pe := p.peers[p.roundRobin]
 		current := p.roundRobin
-		if len(p.peers) > MaxPeerListSize {
+		if limit != 0 && len(p.peers) > limit {
 			if p.IsEraseCandidate(pe) && (eraseCandidate == -1 || !p.ComparePeerErase(p.peers[eraseCandidate], pe)) {
 				if p.shouldEraseImmediately(pe) {
 					if eraseCandidate > current {
