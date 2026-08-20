@@ -176,18 +176,6 @@ func TestAICHRootAnswerRetriesPendingPieceRecovery(t *testing.T) {
 	}
 }
 
-func TestPieceHashMismatchWithoutAICHPeerDoesNotHoldPiece(t *testing.T) {
-	session, transfer := newTestTransfer(t)
-	_ = newAICHPeer(t, session, transfer, 0)
-	want := protocol.MustHashFromString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-	transfer.hashSet = []protocol.Hash{want, want}
-
-	transfer.OnPieceHashCompleted(0, protocol.EMule)
-	if transfer.aichPendingPiece[0] {
-		t.Fatal("没有 AICH 来源时不得把坏片挂起，应回落到整片重下")
-	}
-}
-
 func TestPieceHashMismatchWithoutRootRequestsRoot(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	conn := newAICHPeer(t, session, transfer, 1)
@@ -195,12 +183,36 @@ func TestPieceHashMismatchWithoutRootRequestsRoot(t *testing.T) {
 	transfer.hashSet = []protocol.Hash{want, want}
 
 	transfer.OnPieceHashCompleted(0, protocol.EMule)
-	if !transfer.aichPendingPiece[0] {
-		t.Fatal("缺根时坏片应挂起 AICH 恢复，而不是立即整片重下")
+	if transfer.aichPendingPiece[0] {
+		t.Fatal("缺根时坏片不得挂起等待根应答，应回落整片重下")
 	}
 	reqs := collectAICHFileHashRequests(unpackPeerPackets(t, conn.PendingPackets()))
 	if len(reqs) != 1 {
-		t.Fatalf("缺根坏片应向支持 AICH 的来源请求根哈希，got %d", len(reqs))
+		t.Fatalf("缺根坏片仍应向支持 AICH 的来源请求根哈希，got %d", len(reqs))
+	}
+}
+
+func TestRetryPendingAICHDoesNotOverwriteBusyPeer(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	conn := newAICHPeer(t, session, transfer, 1)
+	transfer.SetAICHRootHash(ComputeAICHHash([]byte("busy-peer-root")))
+	transfer.aichPendingPiece[0] = true
+	transfer.aichPendingPiece[1] = true
+
+	transfer.retryPendingAICHRecoveries()
+	reqs := collectAICHRequests(unpackPeerPackets(t, conn.PendingPackets()))
+	if len(reqs) != 1 {
+		t.Fatalf("同一连接同时只能挂一个分片块哈希请求，got %d", len(reqs))
+	}
+	if conn.pendingAICHPiece < 0 {
+		t.Fatal("应保留第一个已派出的分片索引")
+	}
+	held := conn.pendingAICHPiece
+	if held != 0 && held != 1 {
+		t.Fatalf("unexpected pending piece %d", held)
+	}
+	if !transfer.aichPendingPiece[0] || !transfer.aichPendingPiece[1] {
+		t.Fatal("未派出的分片应继续留在挂起集合，等待该连接空闲")
 	}
 }
 
