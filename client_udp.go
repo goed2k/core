@@ -185,10 +185,12 @@ func (s *Session) withPendingUDPPeer(addr *net.UDPAddr, apply func(*Peer)) {
 			pending = append(pending, peer)
 		}
 	}
-	// ACK/QueueFull/FileNotFound 不含文件 hash。只处理 pending 来源，避免同一 IP 上的其他下载把应答吃掉。
-	for _, peer := range pending {
-		apply(peer)
+	// ACK/QueueFull/FileNotFound 不含文件 hash。只在恰好一个 pending 来源时应用，
+	// 避免同一 IP 上未发起重询的任务抢答，也避免把某一文件的 FileNotFound 误取消另一文件。
+	if len(pending) != 1 {
+		return
 	}
+	apply(pending[0])
 }
 
 func (s *Session) sendClientUDP(addr *net.UDPAddr, pkt []byte) {

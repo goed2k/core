@@ -363,6 +363,43 @@ func TestUploadUDPReaskUsesFileHashToDisambiguateWaitingClients(t *testing.T) {
 	}
 }
 
+func TestDownloadUDPFileNotFoundRequiresUniquePending(t *testing.T) {
+	const sessionTime int64 = 93_000_000
+	session, first := newTestTransfer(t)
+	previousTime := currentCachedTime.Swap(sessionTime)
+	t.Cleanup(func() { currentCachedTime.Store(previousTime) })
+	second, err := NewTransfer(session, AddTransferParams{
+		Hash:       protocol.MustHashFromString("FEDCBA9876543210FEDCBA9876543210"),
+		CreateTime: CurrentTimeMillis(),
+		Size:       PieceSize * 2,
+	})
+	if err != nil {
+		t.Fatalf("构造第二任务失败: %v", err)
+	}
+	session.transfers[second.hash] = second
+	endpoint, err := protocol.EndpointFromString("13.13.13.13", 4662)
+	if err != nil {
+		t.Fatalf("构造来源地址失败: %v", err)
+	}
+	_, _ = attachRemoteQueueTestPeer(t, session, first, endpoint)
+	_, _ = attachRemoteQueueTestPeer(t, session, second, endpoint)
+	a := first.policy.FindPeer(endpoint)
+	b := second.policy.FindPeer(endpoint)
+	a.UDPPort, b.UDPPort = 4672, 4672
+	a.markRemoteQueued(3, sessionTime)
+	b.markRemoteQueued(5, sessionTime)
+	a.udpReaskPending = true
+	b.udpReaskPending = true
+
+	session.handleClientUDP(&net.UDPAddr{IP: net.IPv4(13, 13, 13, 13), Port: 4672}, encodeFileNotFound())
+	if rank, queued := a.RemoteQueueState(); !queued || rank != 3 || !a.udpReaskPending {
+		t.Fatalf("两个 pending 时 FileNotFound 不得误取消任一文件: queued=%t rank=%d pending=%t", queued, rank, a.udpReaskPending)
+	}
+	if rank, queued := b.RemoteQueueState(); !queued || rank != 5 || !b.udpReaskPending {
+		t.Fatalf("两个 pending 时 FileNotFound 不得误取消另一文件: queued=%t rank=%d pending=%t", queued, rank, b.udpReaskPending)
+	}
+}
+
 func TestHelloPersistsRemoteUDPPortForLaterReask(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	endpoint, err := protocol.EndpointFromString("10.1.2.3", 4662)
