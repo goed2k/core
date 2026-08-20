@@ -3,6 +3,7 @@ package disk
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -41,5 +42,37 @@ func TestDesktopFileHandlerPreallocateFull(t *testing.T) {
 	}
 	if info.Size() != size {
 		t.Fatalf("expected size %d, got %d", size, info.Size())
+	}
+}
+
+func TestPreallocateSemanticsMatchesGOOS(t *testing.T) {
+	t.Parallel()
+	got := PreallocateSemantics()
+	switch runtime.GOOS {
+	case "linux":
+		if got != PreallocateLinuxFallocate {
+			t.Fatalf("linux semantics=%s", got)
+		}
+	case "windows":
+		if got != PreallocateWindowsNTFS {
+			t.Fatalf("windows semantics=%s", got)
+		}
+	default:
+		if got != PreallocateTruncateOnly {
+			t.Fatalf("%s semantics=%s, want truncate-only", runtime.GOOS, got)
+		}
+	}
+}
+
+func TestPreallocateZeroSizeNoop(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.bin")
+	handler := NewDesktopFileHandler(path)
+	defer func() { _ = handler.Close() }()
+	if err := handler.Preallocate(0, false); err != nil {
+		t.Fatalf("preallocate 0: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("zero size should not create file, stat err=%v", err)
 	}
 }

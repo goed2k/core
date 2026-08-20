@@ -9,6 +9,12 @@
 ### 新增
 
 - 下载中自动维护 eMule 二进制 `.part.met`：任务创建、脏进度节流和 `Stop` 时原子写出；崩溃留下的合法 `.tmp` 可在导入时恢复。
+- ED2K 链接文件名落盘前清洗：去掉路径穿越；Windows 另替换非法字符、控制字符、保留设备名和尾随点/空格。
+- `disk.PreallocateSemantics`：公开当前平台预分配真实能力（Linux fallocate / Windows NTFS / 其余仅 Truncate）。
+
+### 变更
+
+- Windows 上 `UseSparseFiles` 会先 `FSCTL_SET_SPARSE` 再 Truncate；`PreallocateDiskSpace` 会设置 `FileAllocationInfo`。非 Linux/Windows 明确只 Truncate，不保证稀疏或占盘。
 
 ### 修复
 

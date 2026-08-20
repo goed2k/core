@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,50 @@ func (m *memoryClientStateStore) Load() (*ClientState, error) {
 func (m *memoryClientStateStore) Save(state *ClientState) error {
 	m.state = cloneClientState(state)
 	return nil
+}
+
+func TestClientAddLinkSanitizesTraversalFilename(t *testing.T) {
+	settings := NewSettings()
+	settings.ListenPort = 0
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+
+	dir := t.TempDir()
+	handle, path, err := client.AddLink("ed2k://|file|../etc/passwd|1024|31D6CFE0D16AE931B73C59D7E0C089C0|/", dir)
+	if err != nil {
+		t.Fatalf("add link: %v", err)
+	}
+	if !handle.IsValid() {
+		t.Fatal("expected valid handle")
+	}
+	if filepath.Dir(path) != dir {
+		t.Fatalf("escaped output dir: %s", path)
+	}
+	if filepath.Base(path) != "passwd" {
+		t.Fatalf("unexpected path %s", path)
+	}
+}
+
+func TestClientAddLinkSanitizesWindowsFilename(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows 非法字符清洗只在 Windows 上生效")
+	}
+	settings := NewSettings()
+	settings.ListenPort = 0
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+
+	dir := t.TempDir()
+	handle, path, err := client.AddLink(`ed2k://|file|foo:bar*.bin|1024|31D6CFE0D14CE931B73C59D7E0C04BC0|/`, dir)
+	if err != nil {
+		t.Fatalf("add link: %v", err)
+	}
+	if !handle.IsValid() {
+		t.Fatal("expected valid handle")
+	}
+	if filepath.Base(path) != "foo_bar_.bin" {
+		t.Fatalf("unexpected sanitized path %s", path)
+	}
 }
 
 func TestClientAddLinkSupportsPerTransferOutputDir(t *testing.T) {

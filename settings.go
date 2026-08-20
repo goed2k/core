@@ -50,7 +50,13 @@ type Settings struct {
 	Categories              []Category
 	UseEmuleTempLayout      bool
 	PartialKadPublish       bool
-	PreallocateDiskSpace    bool
+	// PreallocateDiskSpace 为 true 时，创建任务会把数据文件扩展到完整 Size。
+	// Linux 上再 fallocate 尽量占盘；Windows 上再设置 NTFS FileAllocationInfo。
+	// 其他系统仅 Truncate，不保证实际占盘。与 UseSparseFiles 同时打开时以稀疏为准。
+	PreallocateDiskSpace bool
+	// UseSparseFiles 为 true 时优先稀疏扩展，覆盖 PreallocateDiskSpace 的占盘尝试。
+	// Linux 上 Truncate 本身通常生成空洞；Windows 上先 FSCTL_SET_SPARSE 再 Truncate。
+	// 其他系统仅 Truncate，不保证文件系统生成稀疏孔。
 	UseSparseFiles          bool
 	EnableWebDownload       bool
 	MaxHttpSources          int

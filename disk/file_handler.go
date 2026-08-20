@@ -11,8 +11,9 @@ type FileHandler interface {
 	Path() string
 	Close() error
 	DeleteFile() error
-	// Preallocate 将文件扩展到 size。sparse 为 true 时仅扩展逻辑大小（稀疏文件），
-	// 为 false 时尽量在磁盘上预分配连续空间。
+	// Preallocate 将文件扩展到逻辑大小 size。
+	// sparse 为 true 时尽量标记稀疏后再 Truncate；为 false 时尽量占盘。
+	// 真实能力见 PreallocateSemantics：非 Linux/Windows 仅 Truncate，不保证稀疏或占盘。
 	Preallocate(size int64, sparse bool) error
 }
 
@@ -76,11 +77,16 @@ func (h *DesktopFileHandler) Preallocate(size int64, sparse bool) error {
 	if err != nil {
 		return err
 	}
+	// 先标记稀疏或尝试占盘，再保证逻辑大小。占盘/稀疏失败时仍 Truncate，
+	// 这样下载文件一定有正确 Size，调用方能区分“仅扩逻辑大小”和“预留失败”。
+	var extraErr error
+	if sparse {
+		extraErr = setSparseFile(file)
+	} else {
+		extraErr = allocateDiskSpace(file, size)
+	}
 	if err := file.Truncate(size); err != nil {
 		return err
 	}
-	if sparse {
-		return setSparseFile(file)
-	}
-	return allocateDiskSpace(file, size)
+	return extraErr
 }
