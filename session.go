@@ -10,6 +10,7 @@ import (
 	"github.com/goed2k/core/internal/logx"
 	"github.com/goed2k/core/protocol"
 	kadproto "github.com/goed2k/core/protocol/kad"
+	kadv6proto "github.com/goed2k/core/protocol/kadv6"
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
@@ -857,25 +858,35 @@ func (s *Session) sendSearchRequest(task *searchTask, params SearchParams) bool 
 }
 
 func (s *Session) startDHTSearch(task *searchTask, params SearchParams) bool {
-	if s.dhtTracker == nil {
-		return false
-	}
 	keyword := pickKadKeyword(params.Query)
 	if keyword == "" {
 		return false
 	}
-	task.mu.Lock()
-	task.kadKeyword = keyword
-	task.dhtBusy = true
-	task.updatedAt = CurrentTime()
-	task.mu.Unlock()
 	keywordHash, err := protocol.HashFromData([]byte(keyword))
 	if err != nil {
-		task.finishDHT()
 		return false
 	}
+	task.mu.Lock()
+	task.kadKeyword = keyword
+	task.updatedAt = CurrentTime()
+	task.mu.Unlock()
 
-	return s.dhtTracker.SearchKeywords(keywordHash, func(entries []kadproto.SearchEntry) {
+	started := false
+	if s.startKad4KeywordSearch(task, params, keywordHash) {
+		started = true
+	}
+	if s.startKADV6KeywordSearch(task, params, keywordHash) {
+		started = true
+	}
+	return started
+}
+
+func (s *Session) startKad4KeywordSearch(task *searchTask, params SearchParams, keywordHash protocol.Hash) bool {
+	if s.dhtTracker == nil {
+		return false
+	}
+	task.beginDHT()
+	ok := s.dhtTracker.SearchKeywords(keywordHash, func(entries []kadproto.SearchEntry) {
 		s.searchMu.Lock()
 		current := s.activeSearch
 		s.searchMu.Unlock()
@@ -891,6 +902,43 @@ func (s *Session) startDHTSearch(task *searchTask, params SearchParams) bool {
 		}
 		task.finishDHT()
 	})
+	if !ok {
+		task.finishDHT()
+		return false
+	}
+	return true
+}
+
+func (s *Session) startKADV6KeywordSearch(task *searchTask, params SearchParams, keywordHash protocol.Hash) bool {
+	if !s.dhtv6Tracker.hasSearchContacts() {
+		return false
+	}
+	task.beginDHT()
+	ok := s.dhtv6Tracker.SearchKeywords(keywordHash, func(entries []kadv6proto.SearchEntry) {
+		s.applyKADV6KeywordResults(task, params, entries)
+		task.finishDHT()
+	})
+	if !ok {
+		task.finishDHT()
+		return false
+	}
+	return true
+}
+
+func (s *Session) applyKADV6KeywordResults(task *searchTask, params SearchParams, entries []kadv6proto.SearchEntry) {
+	s.searchMu.Lock()
+	current := s.activeSearch
+	s.searchMu.Unlock()
+	if current == nil || current != task {
+		return
+	}
+	for _, entry := range entries {
+		result := makeSearchResultFromKADV6(entry)
+		if !matchesSearchFilters(result, params) {
+			continue
+		}
+		task.mergeResult(result)
+	}
 }
 
 func (s *Session) OnServerSearchResult(sc *ServerConnection, result *serverproto.SearchResult) {

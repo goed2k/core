@@ -7,6 +7,7 @@ import (
 
 	"github.com/goed2k/core/protocol"
 	kadproto "github.com/goed2k/core/protocol/kad"
+	kadv6proto "github.com/goed2k/core/protocol/kadv6"
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
@@ -119,6 +120,7 @@ type searchTask struct {
 	deadlineAt int64
 	serverBusy bool
 	dhtBusy    bool
+	dhtPending int
 	kadKeyword string
 	errText    string
 }
@@ -183,10 +185,25 @@ func (s *searchTask) finishServer() {
 	s.mu.Unlock()
 }
 
+func (s *searchTask) beginDHT() {
+	s.mu.Lock()
+	s.dhtPending++
+	s.dhtBusy = true
+	s.updatedAt = CurrentTime()
+	s.mu.Unlock()
+}
+
 func (s *searchTask) finishDHT() {
 	s.mu.Lock()
-	s.dhtBusy = false
-	s.finishLocked()
+	if s.dhtPending > 0 {
+		s.dhtPending--
+	}
+	if s.dhtPending == 0 {
+		s.dhtBusy = false
+		s.finishLocked()
+	} else {
+		s.updatedAt = CurrentTime()
+	}
 	s.mu.Unlock()
 }
 
@@ -194,6 +211,7 @@ func (s *searchTask) stop() {
 	s.mu.Lock()
 	s.serverBusy = false
 	s.dhtBusy = false
+	s.dhtPending = 0
 	s.state = SearchStateStopped
 	s.updatedAt = CurrentTime()
 	s.mu.Unlock()
@@ -203,6 +221,7 @@ func (s *searchTask) fail(err error) {
 	s.mu.Lock()
 	s.serverBusy = false
 	s.dhtBusy = false
+	s.dhtPending = 0
 	s.state = SearchStateFailed
 	if err != nil {
 		s.errText = err.Error()
@@ -350,6 +369,51 @@ func makeSearchResultFromKAD(entry kadproto.SearchEntry) SearchResult {
 		result.FileType = fileType
 	}
 	result.Note = kadSearchNote(entry)
+	return result
+}
+
+func makeSearchResultFromKADV6(entry kadv6proto.SearchEntry) SearchResult {
+	result := SearchResult{
+		Hash:   entry.ID.Hash,
+		Source: SearchResultKAD,
+	}
+	if name, ok := entry.StringTag(kadv6proto.TagName); ok {
+		result.FileName = name
+	} else if name, ok := entry.StringTag(protocol.FTFilename); ok {
+		result.FileName = name
+	}
+	if size, ok := entry.UIntTag(kadv6proto.TagFileSize); ok {
+		result.FileSize = int64(size)
+	} else if size, ok := entry.UIntTag(protocol.FTFileSize); ok {
+		result.FileSize = int64(size)
+	}
+	if hi, ok := entry.UIntTag(protocol.FTFileSizeHi); ok {
+		result.FileSize += int64(hi << 32)
+	}
+	if sources, ok := entry.UIntTag(protocol.FTSources); ok {
+		result.Sources = int(sources)
+	}
+	if complete, ok := entry.UIntTag(protocol.FTCompleteSources); ok {
+		result.CompleteSources = int(complete)
+	}
+	if bitrate, ok := entry.UIntTag(protocol.FTMediaBitrate); ok {
+		result.MediaBitrate = int(bitrate)
+	}
+	if length, ok := entry.UIntTag(protocol.FTMediaLength); ok {
+		result.MediaLength = int(length)
+	}
+	if codec, ok := entry.StringTag(protocol.FTMediaCodec); ok {
+		result.MediaCodec = codec
+	}
+	if ext, ok := entry.StringTag(protocol.FTFileFormat); ok {
+		result.Extension = ext
+	}
+	if fileType, ok := entry.StringTag(protocol.FTFileType); ok {
+		result.FileType = fileType
+	}
+	if note, ok := entry.StringTag(protocol.FTFileComment); ok && strings.TrimSpace(note) != "" {
+		result.Note = note
+	}
 	return result
 }
 

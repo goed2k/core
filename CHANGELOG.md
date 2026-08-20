@@ -15,6 +15,7 @@
 - KADV6 发布端点支持注入本机 IPv6 探测器；默认 `go test` 用文档地址且禁用公网探测。可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 走真实出站地址。
 - `UseEmuleTempLayout` 任务完成后把 `NNN.part` 重命名到清洗后的最终文件名；`IncomingDir` 来自 eMule 配置或 Settings，空则留在临时目录。目标冲突且大小不同时使用 `name (n).ext`，同大小视为崩溃重试。
 - 服务器搜索支持最小布尔查询：`OR` / `NOT` / `-word`，默认 AND，左结合；过滤条件仍 AND。不支持括号。默认 AND 词仍按原标点切开以对齐 Kad 索引；OR/NOT/`-word` 操作数保持整词。`TokenizeSearchQuery` 跳过 NOT 操作数。
+- `StartSearch` 在 `SearchScopeDHT`/`All` 下，若已设置 KADV6 tracker 则同时启动 KADV6 关键字搜索，与 Kad4 结果按文件 hash 合并去重。无节点时不拨号。
 
 ### 变更
 
