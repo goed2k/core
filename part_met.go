@@ -297,7 +297,7 @@ func resumeFromGaps(fileSize int64, pieceHashes []protocol.Hash, gaps []protocol
 			bits.SetBit(i)
 			continue
 		}
-		downloaded = append(downloaded, completedBlocksInPiece(fileSize, i, start, end, gaps)...)
+		downloaded = append(downloaded, completedBlocksInPiece(fileSize, i, gaps)...)
 	}
 	return &protocol.TransferResumeData{
 		Hashes:           append([]protocol.Hash(nil), pieceHashes...),
@@ -307,26 +307,21 @@ func resumeFromGaps(fileSize int64, pieceHashes []protocol.Hash, gaps []protocol
 }
 
 // completedBlocksInPiece 把 eMule gap 之外、且完整覆盖本实现 BlockSize 的块记入续传。
-// 不改 180/190 KiB 常量；只承认当前 BlockSize 下整块已下载的区间。
-func completedBlocksInPiece(fileSize int64, pieceIndex int, pieceStart, pieceEnd uint64, gaps []protocol.PartMetGap) []data.PieceBlock {
-	if pieceEnd <= pieceStart {
+// 不改 180/190 KiB 常量；只承认当前 BlockSize 下整块已下载的区间，尾片短块按 PieceBlock.Range 夹紧。
+func completedBlocksInPiece(fileSize int64, pieceIndex int, gaps []protocol.PartMetGap) []data.PieceBlock {
+	pieceLen := pieceByteLength(fileSize, pieceIndex)
+	if pieceLen <= 0 {
 		return nil
 	}
-	count := int(DivCeil(int64(pieceEnd-pieceStart), BlockSize))
+	count := int(DivCeil(pieceLen, BlockSize))
 	out := make([]data.PieceBlock, 0, count)
 	for j := 0; j < count; j++ {
-		blockStart := pieceStart + uint64(int64(j)*BlockSize)
-		blockEnd := blockStart + uint64(BlockSize)
-		if blockEnd > pieceEnd {
-			blockEnd = pieceEnd
-		}
-		if uint64(fileSize) < blockEnd {
-			blockEnd = uint64(fileSize)
-		}
-		if blockEnd <= blockStart || rangeOverlapsGaps(blockStart, blockEnd, gaps) {
+		block := data.NewPieceBlock(pieceIndex, j)
+		r := block.Range(fileSize)
+		if r.Right <= r.Left || rangeOverlapsGaps(uint64(r.Left), uint64(r.Right), gaps) {
 			continue
 		}
-		out = append(out, data.NewPieceBlock(pieceIndex, j))
+		out = append(out, block)
 	}
 	return out
 }
@@ -356,16 +351,9 @@ func transferredFromResume(fileSize int64, resume *protocol.TransferResumeData) 
 		if block.PieceIndex >= 0 && block.PieceIndex < numPieces && resume.Pieces.GetBit(block.PieceIndex) {
 			continue
 		}
-		start := int64(block.PieceIndex)*PieceSize + int64(block.PieceBlock)*BlockSize
-		end := start + BlockSize
-		if start >= fileSize {
-			continue
-		}
-		if end > fileSize {
-			end = fileSize
-		}
-		if end > start {
-			done += uint64(end - start)
+		r := block.Range(fileSize)
+		if r.Right > r.Left {
+			done += uint64(r.Right - r.Left)
 		}
 	}
 	return done
