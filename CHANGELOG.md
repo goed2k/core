@@ -21,7 +21,7 @@
 
 ### 变更
 
-- 兼容路线图收口：MultiPacket EXT2 出站/宣告与搜索括号/引号已核对不做；UDPVer 2+、macOS `F_PREALLOCATE` 为后续；IncomingDir 持久化待 Overlay 空路径语义，Config 字段需用户决策。分片大小沿用 eMule 习惯 9.28 MB / 9728000。
+- 兼容路线图收口（更正 #36）：MultiPacket EXT2 出站/宣告与搜索括号/引号已核对不做；UDPVer 2+、macOS `F_PREALLOCATE` 为后续；IncomingDir 持久化待 Overlay 空路径语义，Config 字段需用户决策。分片大小沿用 eMule 习惯 9.28 MB / 9728000。
 - Windows 上 `UseSparseFiles` 会先 `FSCTL_SET_SPARSE` 再 Truncate；`PreallocateDiskSpace` 会设置 `FileAllocationInfo`。非 Linux/Windows 明确只 Truncate，不保证稀疏或占盘。
 - 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.28 MB（9728000 字节）分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
 
