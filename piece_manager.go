@@ -102,6 +102,9 @@ func (p *PieceManager) HashPiece(pieceIndex int) protocol.Hash {
 
 func (p *PieceManager) ReleaseFile(deleteFile bool) ([][]byte, error) {
 	_ = p.handler.Close()
+	if sealer, ok := p.handler.(interface{ Seal() }); ok {
+		sealer.Seal()
+	}
 	if deleteFile {
 		_ = p.handler.DeleteFile()
 	}

@@ -204,6 +204,52 @@ func TestFinishedPromotesEmuleTempPartAfterRelease(t *testing.T) {
 	if sf := session.sharedStore.Get(protocol.EMule); sf == nil || filepath.Base(sf.Path) != "tiny.bin" {
 		t.Fatalf("shared path %+v", sf)
 	}
+	if !handle.transfer.NeedResumeDataSave() {
+		t.Fatal("promoted path must mark resume dirty")
+	}
+}
+
+func TestReleaseSealsHandlerUntilPromote(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "001.part")
+	payload := []byte("seal-me")
+	if err := os.WriteFile(src, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := NewSettings()
+	settings.UseEmuleTempLayout = true
+	settings.ListenPort = 0
+	session := NewSession(settings)
+	handle, err := session.AddTransferParams(AddTransferParams{
+		Hash:       protocol.EMule,
+		CreateTime: CurrentTimeMillis(),
+		Size:       int64(len(payload)),
+		FilePath:   src,
+		FinalName:  "sealed.bin",
+		Handler:    disk.NewDesktopFileHandler(src),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerTransferFileCleanup(t, handle)
+	handle.transfer.picker.WeHave(0)
+	handle.transfer.state = Finished
+	if _, err := handle.transfer.GetPieceManager().ReleaseFile(false); err != nil {
+		t.Fatal(err)
+	}
+	if f := handle.GetFile(); f != nil {
+		t.Fatal("sealed release must not reopen NNN.part")
+	}
+	if raw, err := os.ReadFile(src); err != nil || string(raw) != string(payload) {
+		t.Fatalf("part must not be recreated empty, data=%q err=%v", raw, err)
+	}
+	handle.transfer.OnReleaseFile(NoError, nil, false)
+	if filepath.Base(handle.GetFilePath()) != "sealed.bin" {
+		t.Fatalf("path %s", handle.GetFilePath())
+	}
+	if handle.GetFile() == nil {
+		t.Fatal("promoted handler must open final file")
+	}
 }
 
 func TestFinishedSkipsPromoteWhenTempLayoutDisabled(t *testing.T) {

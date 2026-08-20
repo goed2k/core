@@ -134,6 +134,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		if t.handler != nil {
 			_ = t.handler.Close()
 		}
+		t.sealHandler()
 		t.promoteEmuleTempPartIfNeeded()
 	}
 
@@ -910,6 +911,7 @@ func (t *Transfer) OnBlockRestoreCompleted(block data.PieceBlock, ec BaseErrorCo
 
 func (t *Transfer) OnReleaseFile(_ BaseErrorCode, _ [][]byte, deleteFile bool) {
 	if deleteFile || !t.isFinishedForSharePublish() {
+		t.unsealHandler()
 		return
 	}
 	t.promoteEmuleTempPartIfNeeded()
@@ -937,14 +939,17 @@ func (t *Transfer) finished() {
 
 func (t *Transfer) promoteEmuleTempPartIfNeeded() {
 	if t == nil || t.session == nil || !t.session.settings.UseEmuleTempLayout {
+		t.unsealHandler()
 		return
 	}
 	src := t.GetFilePath()
 	if !isEmuleTempPartPath(src) {
+		t.unsealHandler()
 		return
 	}
 	name := t.finalName
 	if name == "" {
+		t.unsealHandler()
 		return
 	}
 	destDir := filepath.Dir(src)
@@ -954,9 +959,11 @@ func (t *Transfer) promoteEmuleTempPartIfNeeded() {
 	dest, err := promoteEmulePartFile(src, destDir, name)
 	if err != nil {
 		debugPeerf("transfer %s promote part failed: %v", t.hash.String(), err)
+		t.unsealHandler()
 		return
 	}
 	if dest == src {
+		t.unsealHandler()
 		return
 	}
 	t.filePath = dest
@@ -966,10 +973,32 @@ func (t *Transfer) promoteEmuleTempPartIfNeeded() {
 	if setter, ok := t.handler.(interface{ SetPath(string) error }); ok {
 		if err := setter.SetPath(dest); err != nil {
 			debugPeerf("transfer %s set handler path: %v", t.hash.String(), err)
+			t.unsealHandler()
 		}
+	} else {
+		t.unsealHandler()
 	}
 	if t.session.sharedStore != nil {
 		t.session.sharedStore.UpdatePath(t.hash, dest, t.FileName())
+	}
+	t.markResumeDirty()
+}
+
+func (t *Transfer) sealHandler() {
+	if t == nil || t.handler == nil {
+		return
+	}
+	if sealer, ok := t.handler.(interface{ Seal() }); ok {
+		sealer.Seal()
+	}
+}
+
+func (t *Transfer) unsealHandler() {
+	if t == nil || t.handler == nil {
+		return
+	}
+	if sealer, ok := t.handler.(interface{ Unseal() }); ok {
+		sealer.Unseal()
 	}
 }
 
