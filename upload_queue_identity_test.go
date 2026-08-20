@@ -103,6 +103,7 @@ func TestUploadQueueCancelRemovesPersistentIdentity(t *testing.T) {
 		t.Fatal("Cancel/显式移除应删除等待身份")
 	}
 
+	currentCachedTime.Add(Seconds(5))
 	again := newQueuedUploadPeer(t, session, transfer, "10.0.0.3", 4662, userHash, 4672)
 	queue.AddClientToQueue(again)
 	if again.UploadWaitStart() == 0 || again.UploadWaitStart() == oldStart {
@@ -200,5 +201,23 @@ func TestUploadQueueDropsConnectionBoundWaiterOnDisconnect(t *testing.T) {
 	queue.onClientDisconnect(conn)
 	if len(queue.waiting) != 0 {
 		t.Fatal("没有稳定 UserHash 的等待项在断开后不得残留")
+	}
+}
+
+func TestOnDisconnectParksPersistentWaitIdentity(t *testing.T) {
+	session, transfer := newUploadableTestTransfer(t)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("88888888888888888888888888888888")
+	conn := newQueuedUploadPeer(t, session, transfer, "10.0.0.9", 4662, userHash, 4672)
+	queue.AddClientToQueue(conn)
+	waitStart := conn.UploadWaitStart()
+	conn.OnDisconnect(QueueRanking)
+	if len(queue.waiting) != 1 || queue.waiting[0].client != nil {
+		t.Fatal("OnDisconnect 应分离连接并保留等待身份")
+	}
+	if queue.waiting[0].waitStart != waitStart {
+		t.Fatalf("OnDisconnect 不得重置等待起点: got=%d want=%d", queue.waiting[0].waitStart, waitStart)
 	}
 }
