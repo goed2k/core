@@ -16,6 +16,9 @@ const (
 	searchOpEqual    byte = 0x00
 	searchOpGreater  byte = 0x01
 	searchOpLess     byte = 0x02
+	searchBoolAND    byte = 0x00
+	searchBoolOR     byte = 0x01
+	searchBoolNOT    byte = 0x02
 )
 
 type SearchRequest struct {
@@ -32,8 +35,8 @@ func (s *SearchRequest) Get(src *bytes.Reader) error {
 	return nil
 }
 
-func (s *SearchRequest) Put(dst *bytes.Buffer) error {
-	terms := make([]searchTerm, 0, 8)
+func (s *SearchRequest) filterTerms() []searchTerm {
+	terms := make([]searchTerm, 0, 6)
 	if s.FileType != "" {
 		terms = append(terms, searchStringTag(protocol.FTFileType, s.FileType))
 	}
@@ -52,17 +55,28 @@ func (s *SearchRequest) Put(dst *bytes.Buffer) error {
 	if s.MinCompleteSources > 0 {
 		terms = append(terms, searchNumericTag(protocol.FTCompleteSources, searchOpGreater, uint64(s.MinCompleteSources)))
 	}
-	for _, token := range tokenizeSearchQuery(s.Query) {
-		terms = append(terms, searchString(token))
+	return terms
+}
+
+func (s *SearchRequest) Put(dst *bytes.Buffer) error {
+	ops, words := parseSearchQuery(s.Query)
+	queryTerms := make([]searchTerm, 0, len(words))
+	for _, token := range words {
+		queryTerms = append(queryTerms, searchString(token))
 	}
-	for i, term := range terms {
-		if i > 0 {
-			if err := dst.WriteByte(searchTypeBool); err != nil {
-				return err
-			}
-			if err := dst.WriteByte(0x00); err != nil { // AND
-				return err
-			}
+	filters := s.filterTerms()
+	if len(queryTerms) == 0 {
+		return putSearchTerms(dst, filters, nil)
+	}
+	if err := putSearchTerms(dst, queryTerms, ops); err != nil {
+		return err
+	}
+	for _, term := range filters {
+		if err := dst.WriteByte(searchTypeBool); err != nil {
+			return err
+		}
+		if err := dst.WriteByte(searchBoolAND); err != nil {
+			return err
 		}
 		if err := term.put(dst); err != nil {
 			return err
@@ -72,40 +86,11 @@ func (s *SearchRequest) Put(dst *bytes.Buffer) error {
 }
 
 func (s *SearchRequest) BytesCount() int {
-	size := 0
-	terms := 0
-	if s.FileType != "" {
-		size += searchStringTag(protocol.FTFileType, s.FileType).bytesCount()
-		terms++
+	var buf bytes.Buffer
+	if err := s.Put(&buf); err != nil {
+		return 0
 	}
-	if s.Extension != "" {
-		size += searchStringTag(protocol.FTFileFormat, s.Extension).bytesCount()
-		terms++
-	}
-	if s.MinSize > 0 {
-		size += searchNumericTag(protocol.FTFileSize, searchOpGreater, uint64(s.MinSize)).bytesCount()
-		terms++
-	}
-	if s.MaxSize > 0 {
-		size += searchNumericTag(protocol.FTFileSize, searchOpLess, uint64(s.MaxSize)).bytesCount()
-		terms++
-	}
-	if s.MinSources > 0 {
-		size += searchNumericTag(protocol.FTSources, searchOpGreater, uint64(s.MinSources)).bytesCount()
-		terms++
-	}
-	if s.MinCompleteSources > 0 {
-		size += searchNumericTag(protocol.FTCompleteSources, searchOpGreater, uint64(s.MinCompleteSources)).bytesCount()
-		terms++
-	}
-	for _, token := range tokenizeSearchQuery(s.Query) {
-		size += searchString(token).bytesCount()
-		terms++
-	}
-	if terms > 1 {
-		size += (terms - 1) * 2
-	}
-	return size
+	return buf.Len()
 }
 
 type SearchMore struct{}
@@ -327,17 +312,95 @@ func (s searchNumericTerm) bytesCount() int {
 	return size + 8
 }
 
+func TokenizeSearchQuery(query string) []string {
+	_, words := parseSearchQuery(query)
+	return words
+}
+
 func tokenizeSearchQuery(query string) []string {
-	fields := strings.FieldsFunc(strings.TrimSpace(query), func(r rune) bool {
-		return strings.ContainsRune(" ()[]{}<>,._-!?:;\\/\"\t\r\n", r)
-	})
-	out := make([]string, 0, len(fields))
-	for _, field := range fields {
+	return TokenizeSearchQuery(query)
+}
+
+func putSearchTerms(dst *bytes.Buffer, terms []searchTerm, ops []byte) error {
+	for i, term := range terms {
+		if i > 0 {
+			op := searchBoolAND
+			if i-1 < len(ops) {
+				op = ops[i-1]
+			}
+			if err := dst.WriteByte(searchTypeBool); err != nil {
+				return err
+			}
+			if err := dst.WriteByte(op); err != nil {
+				return err
+			}
+		}
+		if err := term.put(dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseSearchQuery 解析最小布尔查询：默认 AND；OR / NOT（或 -word）为二元算子。
+// 左结合，不支持括号。单独的前导算子忽略。
+func parseSearchQuery(query string) (ops []byte, words []string) {
+	raw := strings.Fields(strings.TrimSpace(query))
+	pendingOp := byte(0)
+	hasPending := false
+	for _, field := range raw {
 		field = strings.TrimSpace(field)
 		if field == "" {
 			continue
 		}
-		out = append(out, field)
+		if op, ok := searchOperator(field); ok {
+			if len(words) == 0 {
+				continue
+			}
+			pendingOp = op
+			hasPending = true
+			continue
+		}
+		if strings.HasPrefix(field, "-") && len(field) > 1 {
+			word := strings.Trim(field[1:], "()[]{}<>,._!?:;\\/\"")
+			if word == "" {
+				continue
+			}
+			if len(words) == 0 {
+				words = append(words, word)
+				continue
+			}
+			ops = append(ops, searchBoolNOT)
+			words = append(words, word)
+			hasPending = false
+			continue
+		}
+		word := strings.Trim(field, "()[]{}<>,._!?:;\\/\"")
+		if word == "" {
+			continue
+		}
+		if len(words) > 0 {
+			if hasPending {
+				ops = append(ops, pendingOp)
+			} else {
+				ops = append(ops, searchBoolAND)
+			}
+		}
+		words = append(words, word)
+		hasPending = false
 	}
-	return out
+	return ops, words
+}
+
+func searchOperator(field string) (byte, bool) {
+	switch strings.ToUpper(field) {
+	case "AND":
+		return searchBoolAND, true
+	case "OR":
+		return searchBoolOR, true
+	case "NOT":
+		return searchBoolNOT, true
+	default:
+		return 0, false
+	}
 }

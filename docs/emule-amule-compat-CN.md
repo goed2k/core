@@ -55,7 +55,7 @@
 
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
-| **高级搜索与 KADV6 集成搜索不完整** | `session.go:startDHTSearch` 只启动 Kad4 关键字搜索；服务器查询使用固定字段，未覆盖完整布尔树。虽然 `Client.SearchDHTv6Keywords` API 存在，统一搜索任务没有接入。 | IPv6-only 结果不出现在常规搜索中，复杂筛选与 eMule/aMule 结果不一致。 | 中高 | 以相同查询对比 Server、Kad4、KADV6 的合并/去重；为布尔树、类型、扩展名、大小和来源数建立 golden query。 |
+| **高级搜索：Server 最小布尔树已覆盖；KADV6 统一搜索仍待接入** | `SearchRequest` 解析 `OR`/`NOT`/`-word`，左结合默认 AND；过滤条件仍 AND 到查询树上。不支持括号嵌套。Kad 关键字仍取最长词，跳过 AND/OR/NOT。`startDHTSearch` 仍只走 Kad4；`SearchDHTv6Keywords` 未纳入 `StartSearch`。 | 服务器搜索可表达简单 OR/排除；括号复杂式仍不一致。IPv6-only 结果仍不出现在常规搜索。 | 中高 | 已有 OR/NOT/`-word` 解析与编码、默认 AND、过滤条件仍 AND 测试。括号/引号与 KADV6 合并为后续项。 |
 | **Buddy/PeerCache 生命周期缺失** | `protocol/kad/` 有 Buddy 相关标签/报文，`session_callback.go` 有部分 callback/find buddy 路径；未见完整 Buddy 选举、保活、重连状态机，也未见 PeerCache 实现。 | LowID/NAT 场景回调可靠性和缓存加速能力低于完整客户端。 | 高 | 双 NAT/LowID 环境做 Buddy 建立、失效、替换和回调测试；PeerCache 需先按独立威胁模型与真实协议 fixture 验证。 |
 | **Kad2 与 Kad4↔KADV6 桥接缺失** | `protocol/kad/` 与 `protocol/kadv6/` 是独立实现；`docs/kadv6-protocol*.md` 明确当前无桥接，仓库未见 Kad2 状态机。 | 无法参与对应网络或跨叠加层共享来源。 | 很高 | 先形成协议设计和安全边界 RFC；使用独立互操作节点验证路由、发布、搜索、去环和隐私，不与其他 P0/P1 改动同 PR。 |
 | **`NNN.part` 完成后重命名已覆盖最小闭环** | `UseEmuleTempLayout` 下任务完成后把 `NNN.part` 关文件再搬到 `IncomingDir`（空则同目录）下的清洗后最终名。目标已存在且大小相同视为崩溃重试；大小不同则用 `name (n).ext`。同卷 `Rename`，失败则复制后删源。完成后删除 `.met` 旁注。`FinalName` 随 state 保存。未做跨卷事务日志或 Windows 占用重试队列。 | 临时布局完成后不再长期停在 `001.part`。目标冲突不会覆盖不同内容。 | 中 | 已有同目录改名、Incoming 冲突改名、同大小崩溃重试、穿越名清洗、`finished()` 后路径/内容测试。跨卷复制依赖本机文件系统。 |
@@ -80,7 +80,7 @@
 13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
 14. **KADV6 真实 IPv6 CI（单测已不依赖本机公网 IPv6）**：发布端点可注入，`TestMain` 默认禁用公网探测；可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 仍走真实出站地址。公网 bootstrap/远端搜索的专用 job 仍待后续。
 15. **Settings/state 一致性（已覆盖可持久化策略）**：Config/env/CLI 映射与 v8 快照/恢复、从未发布的 5/6 按 v7 兼容升级、自动保存失败可观测且按间隔重试。过程调优字段仍刻意不持久化。
-16. **P2 项目**：高级搜索、Buddy/PeerCache、Kad2/桥接、互操作/fuzz 各自立项，不共享实现 PR。`NNN.part` 完成搬运已覆盖最小闭环。
+16. **P2 项目**：Server 最小布尔搜索（OR/NOT/`-word`）已覆盖；KADV6 纳入 `StartSearch`、括号/引号、Buddy/PeerCache、Kad2/桥接、互操作/fuzz 各自立项，不共享实现 PR。`NNN.part` 完成搬运已覆盖最小闭环。
 
 ## 7. 多轮审计门禁
 

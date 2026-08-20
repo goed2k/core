@@ -378,11 +378,13 @@ func pickKadKeyword(query string) string {
 	if query == "" {
 		return ""
 	}
-	fields := strings.FieldsFunc(query, func(r rune) bool {
-		return strings.ContainsRune(" ()[]{}<>,._-!?:;\\/\"\t\r\n", r)
-	})
+	fields := serverproto.TokenizeSearchQuery(query)
 	best := ""
 	for _, field := range fields {
+		switch strings.ToUpper(field) {
+		case "AND", "OR", "NOT":
+			continue
+		}
 		if len([]byte(field)) < 3 {
 			continue
 		}

@@ -89,7 +89,7 @@ import "github.com/goed2k/core"
 
 | 方法 | 作用 |
 |------|------|
-| `StartSearch(SearchParams) (SearchHandle, error)` | 启动搜索。 |
+| `StartSearch(SearchParams) (SearchHandle, error)` | 启动搜索。服务器查询支持最小布尔式：`OR` / `NOT` / `-word`，默认 AND，左结合，不支持括号。过滤条件（类型、扩展名、大小、来源数）一律 AND。Kad 仍取最长词。 |
 | `StopSearch() error` | 停止搜索。 |
 | `SearchSnapshot() SearchSnapshot` | 当前搜索结果快照。 |
 

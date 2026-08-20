@@ -9,6 +9,15 @@ import (
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
+func TestPickKadKeywordSkipsBooleanOperators(t *testing.T) {
+	if got := pickKadKeyword("foo OR barbaz NOT x"); got != "barbaz" {
+		t.Fatalf("got %q want barbaz", got)
+	}
+	if got := pickKadKeyword("AND OR NOT"); got != "" {
+		t.Fatalf("operators-only query should not pick a Kad word, got %q", got)
+	}
+}
+
 func TestServerSearchRequestEncodesQueryAndFilters(t *testing.T) {
 	packet := serverproto.SearchRequest{
 		Query:      "shake it off",
