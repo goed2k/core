@@ -60,14 +60,20 @@ func isPlaceholderDownloadFilename(name string) bool {
 func sanitizeWindowsFilename(name string) string {
 	name = strings.Map(replaceWindowsIllegalRune, name)
 	name = strings.TrimRight(name, " .")
-	if name == "" || name == "." || name == ".." {
+	if isPlaceholderDownloadFilename(name) {
 		return "_"
 	}
 	stem, ext := splitFilenameStem(name)
 	if isWindowsReservedDeviceName(stem) {
 		name = stem + "_" + ext
 	}
-	if name == "" {
+	name = truncateDownloadFilename(name, downloadFilenameMaxBytes)
+	stem, ext = splitFilenameStem(name)
+	if isWindowsReservedDeviceName(stem) {
+		// 加 `_` 后再截断，避免 255 字节上限被撑破后又变回设备名。
+		name = truncateDownloadFilename("_"+stem+ext, downloadFilenameMaxBytes)
+	}
+	if isPlaceholderDownloadFilename(name) {
 		return "_"
 	}
 	return name

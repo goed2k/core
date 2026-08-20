@@ -66,6 +66,7 @@ func TestSanitizeDownloadFilenameMappings(t *testing.T) {
 		{name: "上标 COM¹", in: "COM¹.dat", goos: "windows", want: "COM¹_.dat"},
 		{name: "上标 LPT³", in: "lpt³", goos: "windows", want: "lpt³_"},
 		{name: "Unix 不改 CONIN$", in: "CONIN$", goos: "linux", want: "CONIN$"},
+		{name: "保留名加超长扩展不超过上限", in: "CON." + strings.Repeat("a", 251), goos: "windows", want: "_CO." + strings.Repeat("a", 251)},
 	}
 
 	for _, tt := range tests {
