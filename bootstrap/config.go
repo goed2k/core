@@ -40,6 +40,15 @@ type Config struct {
 	PeerTimeout              int
 	MaxDownloadRateKB        int
 	MaxUploadRateKB          int
+	UseEmuleTempLayout       bool
+	PartialKadPublish        bool
+	PreallocateDiskSpace     bool
+	UseSparseFiles           bool
+	EnableWebDownload        bool
+	MaxHttpSources           int
+	MaxConcurrentHttpBlocks  int
+	WebCacheDir              string
+	HttpRequestTimeoutSec    int
 	Timeout                  time.Duration
 	StatePath                string
 	DisableState             bool
@@ -48,18 +57,23 @@ type Config struct {
 // DefaultConfig returns library defaults aligned with the CLI.
 func DefaultConfig() Config {
 	return Config{
-		OutDir:        ".",
-		ServerAddr:    DefaultServerList,
-		ServerMetPath: DefaultServerMet,
-		ListenPort:    4661,
-		UDPPort:       4662,
-		UDPPortV6:     4672,
-		EnableKAD:     true,
-		EnableKADV6:   false,
-		EnableUPnP:    true,
-		KADNodesDat:   DefaultNodesDat,
-		PeerTimeout:   30,
-		StatePath:     DefaultStatePath(),
+		OutDir:                  ".",
+		ServerAddr:              DefaultServerList,
+		ServerMetPath:           DefaultServerMet,
+		ListenPort:              4661,
+		UDPPort:                 4662,
+		UDPPortV6:               4672,
+		EnableKAD:               true,
+		EnableKADV6:             false,
+		EnableUPnP:              true,
+		KADNodesDat:             DefaultNodesDat,
+		PeerTimeout:             30,
+		PartialKadPublish:       true,
+		EnableWebDownload:       true,
+		MaxHttpSources:          4,
+		MaxConcurrentHttpBlocks: 2,
+		HttpRequestTimeoutSec:   30,
+		StatePath:               DefaultStatePath(),
 	}
 }
 
@@ -125,6 +139,15 @@ func (cfg *Config) ApplyEnv(prefix string) {
 	setBool("SEC_IDENT", &cfg.EnableSecIdent)
 	setBool("CREDITS_ONLY_VERIFIED", &cfg.CreditsOnlyVerified)
 	setBool("NO_STATE", &cfg.DisableState)
+	setBool("EMULE_TEMP_LAYOUT", &cfg.UseEmuleTempLayout)
+	setBool("PARTIAL_KAD_PUBLISH", &cfg.PartialKadPublish)
+	setBool("PREALLOCATE_DISK", &cfg.PreallocateDiskSpace)
+	setBool("SPARSE_FILES", &cfg.UseSparseFiles)
+	setBool("WEB_DOWNLOAD", &cfg.EnableWebDownload)
+	setInt("MAX_HTTP_SOURCES", &cfg.MaxHttpSources)
+	setInt("MAX_CONCURRENT_HTTP_BLOCKS", &cfg.MaxConcurrentHttpBlocks)
+	setString("WEB_CACHE_DIR", &cfg.WebCacheDir)
+	setInt("HTTP_REQUEST_TIMEOUT_SEC", &cfg.HttpRequestTimeoutSec)
 	if v := strings.TrimSpace(os.Getenv(prefix + "SECURE")); v != "" {
 		if b, ok := parseBool(v); ok && b {
 			cfg.EnableCryptLayer = true

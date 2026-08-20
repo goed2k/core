@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	ed2k "github.com/goed2k/core"
 )
 
 func TestDefaultStatePath(t *testing.T) {
@@ -62,6 +64,116 @@ func TestInitClientPersistsStatePath(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(settings.StatePath)); err != nil {
 		t.Fatalf("state dir: %v", err)
+	}
+}
+
+func TestBuildSettingsMapsPolicyFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.UseEmuleTempLayout = true
+	cfg.PartialKadPublish = false
+	cfg.PreallocateDiskSpace = true
+	cfg.UseSparseFiles = true
+	cfg.EnableWebDownload = false
+	cfg.MaxHttpSources = 9
+	cfg.MaxConcurrentHttpBlocks = 5
+	cfg.WebCacheDir = "/tmp/webcache"
+	cfg.HttpRequestTimeoutSec = 11
+	cfg.MaxDownloadRateKB = 256
+	cfg.MaxUploadRateKB = 32
+
+	settings, err := BuildSettings(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.UseEmuleTempLayout || settings.PartialKadPublish || !settings.PreallocateDiskSpace || !settings.UseSparseFiles {
+		t.Fatalf("disk/kad flags: %#v", settings)
+	}
+	if settings.EnableWebDownload || settings.MaxHttpSources != 9 || settings.MaxConcurrentHttpBlocks != 5 {
+		t.Fatalf("web: %#v", settings)
+	}
+	if settings.WebCacheDir != "/tmp/webcache" || settings.HttpRequestTimeoutSec != 11 {
+		t.Fatalf("http: %q %d", settings.WebCacheDir, settings.HttpRequestTimeoutSec)
+	}
+	if settings.MaxDownloadRateKB != 256 || settings.MaxUploadRateKB != 32 {
+		t.Fatalf("rates %d/%d", settings.MaxDownloadRateKB, settings.MaxUploadRateKB)
+	}
+}
+
+func TestDefaultConfigAlignsPersistableSettings(t *testing.T) {
+	cfg := DefaultConfig()
+	settings, err := BuildSettings(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := ed2k.NewSettings()
+	if settings.PartialKadPublish != lib.PartialKadPublish ||
+		settings.EnableWebDownload != lib.EnableWebDownload ||
+		settings.MaxHttpSources != lib.MaxHttpSources ||
+		settings.MaxConcurrentHttpBlocks != lib.MaxConcurrentHttpBlocks ||
+		settings.HttpRequestTimeoutSec != lib.HttpRequestTimeoutSec ||
+		settings.UseEmuleTempLayout != lib.UseEmuleTempLayout ||
+		settings.PreallocateDiskSpace != lib.PreallocateDiskSpace ||
+		settings.UseSparseFiles != lib.UseSparseFiles {
+		t.Fatalf("default config drifted from NewSettings: cfg mapped=%+v lib=%+v", settings, lib)
+	}
+}
+
+func TestApplyEnvOverridesPolicyFields(t *testing.T) {
+	t.Setenv("GOED2K_EMULE_TEMP_LAYOUT", "true")
+	t.Setenv("GOED2K_PREALLOCATE_DISK", "true")
+	t.Setenv("GOED2K_SPARSE_FILES", "true")
+	t.Setenv("GOED2K_WEB_DOWNLOAD", "false")
+	t.Setenv("GOED2K_MAX_HTTP_SOURCES", "8")
+	cfg := DefaultConfig()
+	cfg.ApplyEnv("GOED2K_")
+	if !cfg.UseEmuleTempLayout || !cfg.PreallocateDiskSpace || !cfg.UseSparseFiles {
+		t.Fatalf("env disk flags: %+v", cfg)
+	}
+	if cfg.EnableWebDownload || cfg.MaxHttpSources != 8 {
+		t.Fatalf("env web: %+v", cfg)
+	}
+}
+
+func TestInitClientConfigWinsOverRestoredSettings(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+
+	first := DefaultConfig()
+	first.ListenPort = 0
+	first.UDPPort = 0
+	first.EnableKAD = false
+	first.EnableKADV6 = false
+	first.EnableUPnP = false
+	first.ServerAddr = ""
+	first.ServerMetPath = ""
+	first.KADNodesDat = ""
+	first.StatePath = statePath
+	first.UseSparseFiles = true
+	first.MaxDownloadRateKB = 10
+	client, err := InitClient(first, nil)
+	if err != nil {
+		t.Fatalf("init first: %v", err)
+	}
+	if err := client.SaveState(""); err != nil {
+		client.Close()
+		t.Fatal(err)
+	}
+	client.Close()
+
+	second := first
+	second.UseSparseFiles = false
+	second.MaxDownloadRateKB = 99
+	client2, err := InitClient(second, nil)
+	if err != nil {
+		t.Fatalf("init second: %v", err)
+	}
+	defer client2.Close()
+	snap := client2.PersistableSettings()
+	if snap.UseSparseFiles {
+		t.Fatal("config should win over restored sparse flag")
+	}
+	if snap.MaxDownloadRateKB != 99 {
+		t.Fatalf("config should win over restored rate: %d", snap.MaxDownloadRateKB)
 	}
 }
 

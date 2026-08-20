@@ -1,0 +1,283 @@
+package goed2k
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestMigrateClientStateAcceptsHistoricalVersions(t *testing.T) {
+	t.Parallel()
+	for _, v := range []int{0, 1, 2, 3, 4, 5, 6, 7, 8} {
+		st := &ClientState{Version: v, ServerAddress: "1.2.3.4:4661"}
+		if err := migrateClientState(st); err != nil {
+			t.Fatalf("version %d: %v", v, err)
+		}
+		if st.Version != clientStateVersion {
+			t.Fatalf("version %d migrated to %d, want %d", v, st.Version, clientStateVersion)
+		}
+	}
+}
+
+func TestMigrateClientStateRejectsUnknownVersion(t *testing.T) {
+	t.Parallel()
+	st := &ClientState{Version: 99}
+	err := migrateClientState(st)
+	if err == nil {
+		t.Fatal("expected unsupported version 99")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "99") || !strings.Contains(msg, "never shipped") {
+		t.Fatalf("error should name the version and 5/6 policy: %v", err)
+	}
+}
+
+func TestPersistableSettingsRoundTrip(t *testing.T) {
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.UseEmuleTempLayout = true
+	settings.PartialKadPublish = false
+	settings.PreallocateDiskSpace = true
+	settings.UseSparseFiles = true
+	settings.EnableWebDownload = false
+	settings.MaxHttpSources = 7
+	settings.MaxConcurrentHttpBlocks = 3
+	settings.WebCacheDir = filepath.Join(t.TempDir(), "httpcache")
+	settings.HttpRequestTimeoutSec = 12
+	settings.MaxDownloadRateKB = 128
+	settings.MaxUploadRateKB = 64
+
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	path := filepath.Join(t.TempDir(), "state.json")
+	client.SetStatePath(path)
+	if err := client.SaveState(""); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dumped ClientState
+	if err := json.Unmarshal(raw, &dumped); err != nil {
+		t.Fatal(err)
+	}
+	if dumped.Version != clientStateVersion {
+		t.Fatalf("saved version %d", dumped.Version)
+	}
+	if dumped.Settings == nil {
+		t.Fatal("expected settings in snapshot")
+	}
+
+	restored := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, restored)
+	if err := restored.LoadState(path); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	got := persistableSettingsFrom(restored.session.settings)
+	want := persistableSettingsFrom(settings)
+	if got != want {
+		t.Fatalf("restored %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadStateMigratesVersion5And6(t *testing.T) {
+	dir := t.TempDir()
+	for _, v := range []int{5, 6} {
+		path := filepath.Join(dir, "state.json")
+		legacy := ClientState{Version: v, ServerAddress: "9.9.9.9:4661"}
+		raw, err := json.Marshal(legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		client := NewClient(NewSettings())
+		registerClientTransferFileCleanup(t, client)
+		if err := client.LoadState(path); err != nil {
+			t.Fatalf("load v%d: %v", v, err)
+		}
+		if client.ServerAddress() != "9.9.9.9:4661" {
+			t.Fatalf("v%d server %q", v, client.ServerAddress())
+		}
+		if err := client.SaveState(""); err != nil {
+			t.Fatalf("resave v%d: %v", v, err)
+		}
+		rewritten, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got ClientState
+		if err := json.Unmarshal(rewritten, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Version != clientStateVersion {
+			t.Fatalf("v%d resaved as %d", v, got.Version)
+		}
+	}
+}
+
+func TestLoadStateVersion7WithoutSettingsKeepsConstructor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	legacy := ClientState{Version: 7, ServerAddress: "8.8.8.8:4661"}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.UseSparseFiles = true
+	settings.EnableWebDownload = false
+	settings.MaxDownloadRateKB = 77
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	if err := client.LoadState(path); err != nil {
+		t.Fatalf("load v7: %v", err)
+	}
+	if client.ServerAddress() != "8.8.8.8:4661" {
+		t.Fatalf("server %q", client.ServerAddress())
+	}
+	got := persistableSettingsFrom(client.session.settings)
+	if !got.UseSparseFiles || got.EnableWebDownload || got.MaxDownloadRateKB != 77 {
+		t.Fatalf("v7 without settings must keep constructor policy: %#v", got)
+	}
+}
+
+func TestLoadStateAppliesDownloadLimiter(t *testing.T) {
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.MaxDownloadRateKB = 64
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := client.SaveState(path); err != nil {
+		t.Fatal(err)
+	}
+
+	other := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, other)
+	if err := other.LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+	if other.session.downloadLimiter == nil {
+		t.Fatal("expected download limiter")
+	}
+	other.session.downloadLimiter.mu.Lock()
+	rate := other.session.downloadLimiter.rateBps
+	other.session.downloadLimiter.mu.Unlock()
+	if rate != 64*1024 {
+		t.Fatalf("limiter rateBps=%v, want %d", rate, 64*1024)
+	}
+}
+
+func TestAutoSaveFailureIsObservable(t *testing.T) {
+	client := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, client)
+	client.SetStateStore(&failingClientStateStore{err: errors.New("disk full")})
+	if err := client.saveStateIfConfigured(); err == nil {
+		t.Fatal("expected save error")
+	}
+	got := client.LastAutoSaveError()
+	if got == nil || !strings.Contains(got.Error(), "disk full") {
+		t.Fatalf("LastAutoSaveError=%v", got)
+	}
+	client.SetStateStore(&memoryClientStateStore{})
+	if err := client.saveStateIfConfigured(); err != nil {
+		t.Fatal(err)
+	}
+	if client.LastAutoSaveError() != nil {
+		t.Fatalf("success should clear last error: %v", client.LastAutoSaveError())
+	}
+}
+
+func TestFailedAutoSaveDoesNotRetryUntilInterval(t *testing.T) {
+	client := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, client)
+	store := &countingFailStore{err: errors.New("disk full")}
+	client.SetStateStore(store)
+	client.SetAutoSaveInterval(time.Second)
+
+	now := time.Unix(1_700_000_000, 0)
+	next := client.maybeAutoSave(now, now.Add(-time.Second))
+	if store.n != 1 {
+		t.Fatalf("first due save: n=%d", store.n)
+	}
+	if !next.Equal(now) {
+		t.Fatalf("failure must still advance clock, got %v", next)
+	}
+	if client.LastAutoSaveError() == nil {
+		t.Fatal("expected LastAutoSaveError after failure")
+	}
+
+	if next2 := client.maybeAutoSave(now.Add(100*time.Millisecond), next); store.n != 1 {
+		t.Fatalf("retried before interval: n=%d", store.n)
+	} else if !next2.Equal(next) {
+		t.Fatalf("clock should stay until interval: %v", next2)
+	}
+
+	if next3 := client.maybeAutoSave(now.Add(time.Second), next); store.n != 2 {
+		t.Fatalf("should retry after interval: n=%d", store.n)
+	} else if !next3.Equal(now.Add(time.Second)) {
+		t.Fatalf("clock after retry: %v", next3)
+	}
+}
+
+type countingFailStore struct {
+	n   int
+	err error
+}
+
+func (f *countingFailStore) Load() (*ClientState, error) {
+	return nil, f.err
+}
+
+func (f *countingFailStore) Save(*ClientState) error {
+	f.n++
+	return f.err
+}
+
+type failingClientStateStore struct {
+	err error
+}
+
+func (f *failingClientStateStore) Load() (*ClientState, error) {
+	return nil, f.err
+}
+
+func (f *failingClientStateStore) Save(*ClientState) error {
+	return f.err
+}
+
+func TestEphemeralSettingsStayProcessLocal(t *testing.T) {
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.ClientName = "ephemeral-name"
+	settings.MaxPeerListSize = 42
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := client.SaveState(path); err != nil {
+		t.Fatal(err)
+	}
+	other := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, other)
+	if err := other.LoadState(path); err != nil {
+		t.Fatal(err)
+	}
+	if other.session.settings.ClientName == "ephemeral-name" {
+		t.Fatal("ClientName should not be restored from state")
+	}
+	if other.session.settings.MaxPeerListSize == 42 {
+		t.Fatal("MaxPeerListSize should not be restored from state")
+	}
+}

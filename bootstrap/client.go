@@ -32,6 +32,15 @@ func BuildSettings(cfg Config) (ed2k.Settings, error) {
 	settings.PeerConnectionTimeout = cfg.PeerTimeout
 	settings.MaxDownloadRateKB = cfg.MaxDownloadRateKB
 	settings.MaxUploadRateKB = cfg.MaxUploadRateKB
+	settings.UseEmuleTempLayout = cfg.UseEmuleTempLayout
+	settings.PartialKadPublish = cfg.PartialKadPublish
+	settings.PreallocateDiskSpace = cfg.PreallocateDiskSpace
+	settings.UseSparseFiles = cfg.UseSparseFiles
+	settings.EnableWebDownload = cfg.EnableWebDownload
+	settings.MaxHttpSources = cfg.MaxHttpSources
+	settings.MaxConcurrentHttpBlocks = cfg.MaxConcurrentHttpBlocks
+	settings.WebCacheDir = cfg.WebCacheDir
+	settings.HttpRequestTimeoutSec = cfg.HttpRequestTimeoutSec
 	if cfg.CategoriesConfig != "" {
 		cats, err := ed2k.ParseCategoriesConfig(cfg.CategoriesConfig)
 		if err != nil {
@@ -80,6 +89,8 @@ func InitClient(cfg Config, logger *slog.Logger) (*ed2k.Client, error) {
 		if err := client.LoadState(""); err != nil {
 			return nil, fmt.Errorf("load state: %w", err)
 		}
+		// bootstrap/CLI 配置覆盖状态里恢复的可持久化策略，避免旧 state 压过本次启动参数。
+		client.OverlayPersistableSettings(settings)
 	}
 
 	if err := client.Start(); err != nil {

@@ -1250,6 +1250,10 @@ func cloneClientState(src *ClientState) *ClientState {
 		Credits:       append([]ClientCreditState(nil), src.Credits...),
 		FriendSlots:   append([]protocol.Hash(nil), src.FriendSlots...),
 	}
+	if src.Settings != nil {
+		copied := *src.Settings
+		dst.Settings = &copied
+	}
 	if src.DHT != nil {
 		dst.DHT = cloneDHTState(src.DHT)
 	}

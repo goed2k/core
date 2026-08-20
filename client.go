@@ -59,6 +59,8 @@ type Client struct {
 	progressListeners    map[int]chan TransferProgressEvent
 	nextProgressID       int
 	lastProgress         map[protocol.Hash]TransferProgressSnapshot
+	autoSaveMu           sync.Mutex
+	lastAutoSaveErr      error
 }
 
 func NewClient(settings Settings) *Client {
@@ -446,6 +448,7 @@ func (c *Client) Stop() error {
 		flushErr := c.flushPartMet(time.Now(), true)
 		if c.stateStore != nil {
 			err = c.SaveState("")
+			c.noteAutoSaveResult(err)
 		}
 		if err == nil {
 			err = flushErr
@@ -1012,10 +1015,7 @@ func (c *Client) loop() {
 			UpdateCachedTime()
 			c.session.SecondTick(CurrentTime(), elapsed.Milliseconds())
 			_ = c.flushPartMet(now, false)
-			if c.stateStore != nil && c.autoSaveTick > 0 && now.Sub(lastSave) >= c.autoSaveTick {
-				_ = c.SaveState("")
-				lastSave = now
-			}
+			lastSave = c.maybeAutoSave(now, lastSave)
 		case <-c.stopCh:
 			return
 		}
@@ -1040,5 +1040,38 @@ func (c *Client) saveStateIfConfigured() error {
 	if c.stateStore == nil {
 		return nil
 	}
-	return c.SaveState("")
+	err := c.SaveState("")
+	c.noteAutoSaveResult(err)
+	return err
+}
+
+// maybeAutoSave 到期则尝试保存。无论成败都推进时钟，避免磁盘满时每 tick 狂写/刷 Warn。
+func (c *Client) maybeAutoSave(now, lastSave time.Time) time.Time {
+	if c == nil || c.stateStore == nil || c.autoSaveTick <= 0 {
+		return lastSave
+	}
+	if now.Sub(lastSave) < c.autoSaveTick {
+		return lastSave
+	}
+	_ = c.saveStateIfConfigured()
+	return now
+}
+
+// LastAutoSaveError 返回最近一次自动保存的错误；成功后为 nil。
+func (c *Client) LastAutoSaveError() error {
+	if c == nil {
+		return nil
+	}
+	c.autoSaveMu.Lock()
+	defer c.autoSaveMu.Unlock()
+	return c.lastAutoSaveErr
+}
+
+func (c *Client) noteAutoSaveResult(err error) {
+	c.autoSaveMu.Lock()
+	c.lastAutoSaveErr = err
+	c.autoSaveMu.Unlock()
+	if err != nil {
+		logx.Warn("auto-save state failed", "err", err)
+	}
 }
