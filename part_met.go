@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/protocol"
@@ -14,6 +16,8 @@ import (
 
 const partMetFormat = "goed2k.part.met"
 const partMetVersion = 1
+
+var partMetWriteMu sync.Mutex
 
 // PartMetDocument 为 <file>.part.met JSON 旁注格式。
 type PartMetDocument struct {
@@ -363,10 +367,12 @@ func transferredFromResume(fileSize int64, resume *protocol.TransferResumeData) 
 }
 
 func writePartMetAtomic(target string, raw []byte) error {
+	partMetWriteMu.Lock()
+	defer partMetWriteMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	tmp := target + ".tmp"
+	tmp := target + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
 		_ = os.Remove(tmp)
 		return err
@@ -390,23 +396,41 @@ func replaceFile(tmp, target string) error {
 
 // recoverPartMetSidecar 处理崩溃留下的 <file>.tmp：
 // 目标已是合法 .part.met 则丢掉过期 tmp；目标缺失或损坏且 tmp 可解析则提升 tmp。
+func listPartMetTmps(target string) []string {
+	matches, err := filepath.Glob(target + ".tmp*")
+	if err != nil {
+		return nil
+	}
+	return matches
+}
+
 func recoverPartMetSidecar(target string) {
-	tmp := target + ".tmp"
+	tmps := listPartMetTmps(target)
 	if raw, err := os.ReadFile(target); err == nil {
 		if _, err := ParsePartMetBytes(raw); err == nil {
-			_ = os.Remove(tmp)
+			for _, tmp := range tmps {
+				_ = os.Remove(tmp)
+			}
 			return
 		}
 	}
-	raw, err := os.ReadFile(tmp)
-	if err != nil {
+	for _, tmp := range tmps {
+		raw, err := os.ReadFile(tmp)
+		if err != nil {
+			continue
+		}
+		if _, err := ParsePartMetBytes(raw); err != nil {
+			_ = os.Remove(tmp)
+			continue
+		}
+		if replaceFile(tmp, target) != nil {
+			continue
+		}
+		for _, leftover := range listPartMetTmps(target) {
+			_ = os.Remove(leftover)
+		}
 		return
 	}
-	if _, err := ParsePartMetBytes(raw); err != nil {
-		_ = os.Remove(tmp)
-		return
-	}
-	_ = replaceFile(tmp, target)
 }
 
 func partMetPath(path string) string {

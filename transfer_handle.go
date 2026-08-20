@@ -119,6 +119,15 @@ func (h TransferHandle) GetResumeData() *protocol.TransferResumeData {
 	return h.transfer.ResumeData()
 }
 
+func (h TransferHandle) SnapshotResumeData() *protocol.TransferResumeData {
+	if h.transfer == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.transfer.snapshotResumeData()
+}
+
 func (h TransferHandle) GetStatus() TransferStatus {
 	if h.transfer == nil {
 		return TransferStatus{}
@@ -162,6 +171,15 @@ func (h TransferHandle) HttpSources() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.transfer.HttpSources()
+}
+
+func (h TransferHandle) MarkResumeDataSaved() {
+	if h.transfer == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.transfer.MarkResumeDataSaved()
 }
 
 func (h TransferHandle) NeedResumeDataSave() bool {

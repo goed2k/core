@@ -185,6 +185,60 @@ func TestClientFlushPartMetThrottlesAndForceWrites(t *testing.T) {
 	}
 }
 
+func TestClientPartMetPendingSurvivesStateSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	settings := NewSettings()
+	settings.ListenPort = 0
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	client.SetPartMetFlushInterval(time.Hour)
+
+	handle, path, err := client.AddLink("ed2k://|file|pending.bin|19456000|31D6CFE0D16AE931B73C59D7E0C089C3|/", dir)
+	if err != nil {
+		t.Fatalf("add link: %v", err)
+	}
+	if err := client.FlushPartMet(true); err != nil {
+		t.Fatalf("initial flush: %v", err)
+	}
+
+	block := data.NewPieceBlock(0, 1)
+	if _, err := handle.transfer.pm.WriteBlock(block, make([]byte, BlockSize)); err != nil {
+		t.Fatalf("write block: %v", err)
+	}
+	handle.transfer.picker.WeHaveBlock(block)
+	handle.transfer.needSaveResumeData = true
+
+	now := time.Now()
+	if err := client.flushPartMet(now, false); err != nil {
+		t.Fatalf("throttled flush: %v", err)
+	}
+	handle.MarkResumeDataSaved()
+	if handle.NeedResumeDataSave() {
+		t.Fatal("MarkResumeDataSaved should clear NeedResumeDataSave")
+	}
+	got, err := ImportPartMet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Resume != nil && len(got.Resume.DownloadedBlocks) != 0 {
+		t.Fatalf("throttled write should still skip: %+v", got.Resume.DownloadedBlocks)
+	}
+
+	if err := client.flushPartMet(now.Add(2*time.Hour), false); err != nil {
+		t.Fatalf("later flush: %v", err)
+	}
+	got, err = ImportPartMet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Resume == nil || len(got.Resume.DownloadedBlocks) != 1 || got.Resume.DownloadedBlocks[0] != block {
+		t.Fatalf("pending sidecar should write after interval: %+v", got.Resume)
+	}
+	if handle.transfer != nil && handle.transfer.handler != nil {
+		_ = handle.transfer.handler.Close()
+	}
+}
+
 func TestClientStopFlushesDirtyPartMet(t *testing.T) {
 	dir := t.TempDir()
 	settings := NewSettings()

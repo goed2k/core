@@ -44,6 +44,7 @@ type Client struct {
 	partMetFlushInterval time.Duration
 	partMetFlushMu       sync.Mutex
 	lastPartMetFlush     map[protocol.Hash]time.Time
+	pendingPartMet       map[protocol.Hash]bool
 	stopCh               chan struct{}
 	doneCh               chan struct{}
 	startOnce            sync.Once
@@ -71,6 +72,7 @@ func NewClient(settings Settings) *Client {
 		autoSaveTick:         5 * time.Second,
 		partMetFlushInterval: defaultPartMetFlushInterval,
 		lastPartMetFlush:     make(map[protocol.Hash]time.Time),
+		pendingPartMet:       make(map[protocol.Hash]bool),
 		stopCh:               make(chan struct{}),
 		doneCh:               make(chan struct{}),
 	}
@@ -844,6 +846,7 @@ func (c *Client) RemoveTransfer(hash protocol.Hash, deleteFile bool) error {
 	}
 	c.partMetFlushMu.Lock()
 	delete(c.lastPartMetFlush, hash)
+	delete(c.pendingPartMet, hash)
 	c.partMetFlushMu.Unlock()
 	if err := c.saveStateIfConfigured(); err != nil {
 		return err
@@ -918,26 +921,32 @@ func (c *Client) flushOnePartMet(handle TransferHandle, now time.Time, force boo
 	if handle.GetFilePath() == "" {
 		return nil
 	}
-	if !force && !handle.NeedResumeDataSave() {
-		return nil
-	}
 	hash := handle.GetHash()
 	c.partMetFlushMu.Lock()
-	interval := c.partMetFlushInterval
-	last := c.lastPartMetFlush[hash]
-	c.partMetFlushMu.Unlock()
-	if !force && interval > 0 && !last.IsZero() && now.Sub(last) < interval {
-		return nil
+	defer c.partMetFlushMu.Unlock()
+	if c.pendingPartMet == nil {
+		c.pendingPartMet = make(map[protocol.Hash]bool)
 	}
-	if err := c.ExportPartMetForTransfer(hash); err != nil {
-		return err
-	}
-	c.partMetFlushMu.Lock()
 	if c.lastPartMetFlush == nil {
 		c.lastPartMetFlush = make(map[protocol.Hash]time.Time)
 	}
+	if handle.NeedResumeDataSave() {
+		c.pendingPartMet[hash] = true
+	}
+	if !force && !c.pendingPartMet[hash] {
+		return nil
+	}
+	interval := c.partMetFlushInterval
+	last := c.lastPartMetFlush[hash]
+	if !force && interval > 0 && !last.IsZero() && now.Sub(last) < interval {
+		return nil
+	}
+	if err := c.exportPartMetForTransferLocked(handle); err != nil {
+		return err
+	}
+	handle.MarkResumeDataSaved()
+	c.pendingPartMet[hash] = false
 	c.lastPartMetFlush[hash] = now
-	c.partMetFlushMu.Unlock()
 	return nil
 }
 
@@ -946,15 +955,23 @@ func (c *Client) ExportPartMetForTransfer(hash protocol.Hash) error {
 	if !handle.IsValid() {
 		return errors.New("transfer not found")
 	}
+	return c.exportPartMetForTransferLocked(handle)
+}
+
+func (c *Client) exportPartMetForTransferLocked(handle TransferHandle) error {
 	path := handle.GetFilePath()
 	if path == "" {
 		return errors.New("transfer has no file path")
+	}
+	resume := handle.SnapshotResumeData()
+	if resume == nil {
+		return errors.New("resume data is nil")
 	}
 	return ExportPartMet(path, PartMetInfo{
 		Hash:        handle.GetHash(),
 		FileSize:    handle.GetSize(),
 		Filename:    filepath.Base(path),
-		Resume:      handle.GetResumeData(),
+		Resume:      resume,
 		HttpSources: handle.HttpSources(),
 	})
 }

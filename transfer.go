@@ -382,6 +382,18 @@ func (t *Transfer) PreviewPiece(index uint16) ([]byte, bool) {
 }
 
 func (t *Transfer) ResumeData() *protocol.TransferResumeData {
+	trd := t.snapshotResumeData()
+	t.needSaveResumeData = false
+	return trd
+}
+
+func (t *Transfer) MarkResumeDataSaved() {
+	if t != nil {
+		t.needSaveResumeData = false
+	}
+}
+
+func (t *Transfer) snapshotResumeData() *protocol.TransferResumeData {
 	trd := &protocol.TransferResumeData{}
 	trd.Hashes = append(trd.Hashes, t.hashSet...)
 	trd.Pieces = protocol.NewBitField(t.picker.NumPieces())
@@ -402,7 +414,6 @@ func (t *Transfer) ResumeData() *protocol.TransferResumeData {
 			trd.Peers = append(trd.Peers, peer.Endpoint)
 		}
 	}
-	t.needSaveResumeData = false
 	return trd
 }
 
