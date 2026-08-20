@@ -32,7 +32,7 @@ func sanitizeDownloadFilename(name string, goos string) string {
 	name = strings.ReplaceAll(name, "\x00", "")
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = path.Base(name)
-	if name == "." || name == ".." || name == "" {
+	if isPlaceholderDownloadFilename(name) {
 		return "_"
 	}
 	if goos == "windows" {
@@ -40,13 +40,17 @@ func sanitizeDownloadFilename(name string, goos string) string {
 	}
 	name = truncateDownloadFilename(name, downloadFilenameMaxBytes)
 	if goos == "windows" {
-		// 截断可能落在点/空格上，再收一次尾随非法结尾。
-		name = strings.TrimRight(name, " .")
-		if name == "" || name == "." || name == ".." {
-			return "_"
-		}
+		// 截断/去尾后可能重新变成保留设备名或空名，必须再清洗一次。
+		name = sanitizeWindowsFilename(name)
+	}
+	if isPlaceholderDownloadFilename(name) {
+		return "_"
 	}
 	return name
+}
+
+func isPlaceholderDownloadFilename(name string) bool {
+	return name == "" || name == "." || name == ".." || name == "/" || name == "\\"
 }
 
 func sanitizeWindowsFilename(name string) string {

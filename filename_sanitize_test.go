@@ -30,6 +30,9 @@ func TestSanitizeDownloadFilenameMappings(t *testing.T) {
 		{name: "仅两点", in: "..", goos: "linux", want: "_"},
 		{name: "仅一点", in: ".", goos: "windows", want: "_"},
 		{name: "空名", in: "", goos: "linux", want: "_"},
+		{name: "仅正斜杠", in: "/", goos: "linux", want: "_"},
+		{name: "仅反斜杠", in: `\`, goos: "windows", want: "_"},
+		{name: "一串分隔符", in: `///\\`, goos: "linux", want: "_"},
 		{name: "盘符路径", in: `C:\Windows\system.ini`, goos: "windows", want: "system.ini"},
 		{name: "保留名 CON", in: "CON", goos: "windows", want: "CON_"},
 		{name: "保留名大小写", in: "con", goos: "windows", want: "con_"},
@@ -51,6 +54,8 @@ func TestSanitizeDownloadFilenameMappings(t *testing.T) {
 		{name: "重复映射到同一名字", in: "foo:bar", goos: "windows", want: "foo_bar"},
 		{name: "重复映射另一非法字符", in: "foo?bar", goos: "windows", want: "foo_bar"},
 		{name: "截断后去掉尾随空格", in: strings.Repeat("a", 200) + strings.Repeat(" ", 60) + "x", goos: "windows", want: strings.Repeat("a", 200)},
+		{name: "截断后重现保留名", in: "CON" + strings.Repeat(" ", 300) + "x", goos: "windows", want: "CON_"},
+		{name: "截断后重现 NUL", in: "nul" + strings.Repeat(" ", 300) + "x", goos: "windows", want: "nul_"},
 	}
 
 	for _, tt := range tests {
@@ -103,5 +108,8 @@ func TestSanitizeDownloadFilenamePublicUsesRuntimeGOOS(t *testing.T) {
 	}
 	if got := SanitizeDownloadFilename("../x.bin"); got != "x.bin" {
 		t.Fatalf("traversal: got %q", got)
+	}
+	if got := SanitizeDownloadFilename("/"); got != "_" {
+		t.Fatalf("slash-only: got %q", got)
 	}
 }

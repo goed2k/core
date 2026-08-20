@@ -68,6 +68,21 @@ func TestResolveEmuleDownloadPathTempLayoutIgnoresUnsafeName(t *testing.T) {
 	}
 }
 
+func TestResolveEmuleDownloadPathSeparatorOnlyName(t *testing.T) {
+	dir := t.TempDir()
+	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	if path == dir || filepath.Dir(path) != dir {
+		t.Fatalf("separator-only name must stay inside outDir as a file, got %s", path)
+	}
+	if filepath.Base(path) != "_" {
+		t.Fatalf("expected placeholder _, got %s", path)
+	}
+}
+
 func TestResolveEmuleDownloadPathSanitizesTraversal(t *testing.T) {
 	dir := t.TempDir()
 	path, cleanup, err := ResolveEmuleDownloadPath(NewSettings(), dir, "../etc/passwd")
