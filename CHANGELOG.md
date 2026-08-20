@@ -14,16 +14,16 @@
 - Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn；失败仍按间隔重试，避免每 tick 刷盘。
 - KADV6 发布端点支持注入本机 IPv6 探测器；默认 `go test` 用文档地址且禁用公网探测。可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 走真实出站地址。
 - `UseEmuleTempLayout` 任务在释放文件句柄后把 `NNN.part` 搬到清洗后的最终文件名。目标目录优先已接入 Settings 的 `IncomingDir`（eMule 导入写入；空则用 part 所在目录，不发明默认 Incoming 路径）。目标已存在则改用 `name (n).ext`，不覆盖。同卷 `Rename`，仅跨卷失败时复制后删源。完成后删除 `.part.met` 旁注。`FinalName` 随任务 state 保存。
-- 服务器搜索支持最小布尔查询：`OR` / `NOT` / `-word`，默认 AND，左结合；过滤条件仍 AND。不支持括号。默认 AND 词仍按原标点切开以对齐 Kad 索引；OR/NOT/`-word` 操作数保持整词。`TokenizeSearchQuery` 跳过 NOT 操作数。
+- 服务器搜索支持最小布尔查询：`OR` / `NOT` / `-word`，默认 AND，左结合；过滤条件仍 AND。括号/引号已核对不做（需递归下降并改 Kad 分词）。默认 AND 词仍按原标点切开以对齐 Kad 索引；OR/NOT/`-word` 操作数保持整词。`TokenizeSearchQuery` 跳过 NOT 操作数。
 - `StartSearch` 在 `SearchScopeDHT`/`All` 下，若已设置 KADV6 tracker 则同时启动 KADV6 关键字搜索，与 Kad4 结果按文件 hash 合并去重。无节点时不拨号。
-- 兼容路线图收口：其余曾标可做项（IncomingDir 持久化、括号搜索、UDPVer 2+、macOS 预分配、公网 IPv6 CI、互操作矩阵）标明不做或需用户决策；IRC/浏览共享/Kad2/完整 Buddy/Captcha/MultiPacket 出站刻意不做。
 - `Policy.IsConnectCandidate` 使用 `Settings.MaxFailCount`（默认 20），不再硬编码 10。无 Settings 或 `<=0` 时回落 20。
 - `Policy.AddPeer` / `ErasePeers` 使用 `Settings.MaxPeerListSize`（默认 100），不再只读包常量。无 Settings 或 `<=0` 时回落包常量 100。
 
 ### 变更
 
+- 兼容路线图收口（更正 #36）：MultiPacket EXT2 出站/宣告与搜索括号/引号已核对不做；UDPVer 2+、macOS `F_PREALLOCATE` 为后续；IncomingDir 持久化待 Overlay 空路径语义，Config 字段需用户决策。分片大小沿用 eMule 习惯 9.28 MB / 9728000。
 - Windows 上 `UseSparseFiles` 会先 `FSCTL_SET_SPARSE` 再 Truncate；`PreallocateDiskSpace` 会设置 `FileAllocationInfo`。非 Linux/Windows 明确只 Truncate，不保证稀疏或占盘。
-- 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.28 MiB（9728000 字节）分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
+- 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.28 MB（9728000 字节）分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
 
 ### 修复
 
