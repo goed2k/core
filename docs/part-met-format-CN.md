@@ -20,7 +20,8 @@ goed2k 通过 `ExportPartMet` 导出 **eMule/aMule 兼容的二进制** `<path>.
 - 完全不被 gap 覆盖的 piece 记入 `completed_pieces`。
 - 未完成 piece 中，按当前 `BlockSize`（190 KiB）整块已下载的区间记入 `downloaded_blocks`；尾片短块按实际文件长度夹紧。
 - 半块或被 gap 切开的块不计入（保守；180 KiB 统一后再评估不对齐尾部）。
-- 下载过程中不会自动写出 `.part.met`，需显式调用 `ExportPartMet`。日常续传仍走 `client_state.go`。
+- 下载中 `Client` 会在任务创建、脏进度节流周期和 `Stop` 时原子写出 `.part.met`（先写 `.tmp` 再替换）。崩溃留下的合法 `.tmp` 会在下次导入时提升；损坏 `.tmp` 不会覆盖已有合法文件。
+- 仍可用 `ExportPartMet` / `FlushPartMet` 显式写出。`client_state.go` 继续保存 goed2k 自身状态。
 
 ## JSON 旁注字段说明
 

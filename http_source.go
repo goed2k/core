@@ -102,7 +102,7 @@ func (t *Transfer) AddHttpSource(rawURL string) error {
 	if err := t.httpSources.Add(rawURL); err != nil {
 		return err
 	}
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 	return nil
 }
 

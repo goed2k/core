@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/goed2k/core/data"
 	"github.com/goed2k/core/protocol"
@@ -14,6 +17,8 @@ import (
 
 const partMetFormat = "goed2k.part.met"
 const partMetVersion = 1
+
+var partMetWriteMu sync.Mutex
 
 // PartMetDocument 为 <file>.part.met JSON 旁注格式。
 type PartMetDocument struct {
@@ -115,8 +120,11 @@ func exportPartMetJSON(path string, info PartMetInfo) error {
 }
 
 // ImportPartMet 自动识别 eMule 二进制或 goed2k JSON .part.met。
+// 导入前会尝试恢复未完成的原子写出（合法 .tmp 提升，损坏 .tmp 删除，不覆盖已有合法文件）。
 func ImportPartMet(path string) (PartMetInfo, error) {
 	target := partMetPath(path)
+	recoverPartMetSidecar(target)
+	recoverPartMetSidecar(target + ".json")
 	raw, err := os.ReadFile(target)
 	if err != nil {
 		return PartMetInfo{}, err
@@ -360,18 +368,92 @@ func transferredFromResume(fileSize int64, resume *protocol.TransferResumeData) 
 }
 
 func writePartMetAtomic(target string, raw []byte) error {
+	partMetWriteMu.Lock()
+	defer partMetWriteMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	tmp := target + ".tmp"
+	tmp := target + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, target); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
+	if err := replaceFile(tmp, target); err != nil {
+		// 保留完整 tmp，供下次导入/写出时 recover。
+		return err
+	}
 	return nil
+}
+
+func replaceFile(tmp, target string) error {
+	if err := os.Rename(tmp, target); err == nil {
+		return nil
+	}
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(tmp, target)
+}
+
+// recoverPartMetSidecar 处理崩溃留下的 <file>.tmp：
+// 目标已是合法 .part.met 则丢掉过期 tmp；目标缺失或损坏且 tmp 可解析则提升 tmp。
+func listPartMetTmps(target string) []string {
+	dir := filepath.Dir(target)
+	base := filepath.Base(target)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	prefix := base + ".tmp"
+	out := make([]string, 0)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name != prefix && !strings.HasPrefix(name, prefix+".") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, name))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		fi, errI := os.Stat(out[i])
+		fj, errJ := os.Stat(out[j])
+		if errI != nil || errJ != nil {
+			return out[i] > out[j]
+		}
+		return fi.ModTime().After(fj.ModTime())
+	})
+	return out
+}
+
+func recoverPartMetSidecar(target string) {
+	tmps := listPartMetTmps(target)
+	if raw, err := os.ReadFile(target); err == nil {
+		if _, err := ParsePartMetBytes(raw); err == nil {
+			for _, tmp := range tmps {
+				_ = os.Remove(tmp)
+			}
+			return
+		}
+	}
+	for _, tmp := range tmps {
+		raw, err := os.ReadFile(tmp)
+		if err != nil {
+			continue
+		}
+		if _, err := ParsePartMetBytes(raw); err != nil {
+			_ = os.Remove(tmp)
+			continue
+		}
+		if replaceFile(tmp, target) != nil {
+			continue
+		}
+		for _, leftover := range listPartMetTmps(target) {
+			_ = os.Remove(leftover)
+		}
+		return
+	}
 }
 
 func partMetPath(path string) string {

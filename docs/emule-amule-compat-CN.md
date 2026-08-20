@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `4d9a296`（2026-08-20 审查，含 AICH 根哈希主动请求与跨连接上传队列身份）。
+- **基线**：`main` 分支提交 `2e1d9c9`（2026-08-20 审查，含 `.part.met` 精确导入与 AICH 根哈希主动请求）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -44,7 +44,7 @@
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
 | **Server Login 混淆能力位已覆盖；UDP/混淆端口不是 Login 标签** | aMule `ServerConnect.cpp` 的 `OP_LOGINREQUEST` 固定写入 4 个标签：`CT_NAME`、`CT_VERSION`、`CT_SERVER_FLAGS`、`CT_EMULE_VERSION`。`NewLoginRequestWith` 按同一文件的 `IsClientCryptLayerSupported/Requested/Required` 映射，在 `CT_SERVER_FLAGS` 置位 `SRVCAP_SUPPORTCRYPT/REQUESTCRYPT/REQUIRECRYPT`。登录 IP 仍为 0，不声明 `CapableIPInLogin`。不写入 Hello `ET_UDPPORT`（0x21）、`ET_COMMENTS`（0x24）或 server.met `ST_TCPPORTOBFUSCATION`（0x97）。客户端 UDP 端口继续由 Hello `CT_EMULE_UDPPORTS` 告知对端；服务器混淆端口由 `IdChange` / `server.met` 下发。 | 支持混淆的服务器可按官方能力位决定是否接受/要求 CryptLayer。臆造 Login 端口标签会被官方客户端/服务器忽略或误解析，因此明确不做。 | 中 | 已有表驱动覆盖关闭/启用/仅要求/同时要求的能力位、固定 4 标签、禁止 0x21/0x24/0x97，以及 Put/Get 与组包往返。仍需真实服务器检查 IdChange/混淆回连。 |
-| **`.part.met` 精确导入已覆盖部分 piece 块；运行时自动写出仍未完成** | `resumeFromGaps` 对无 gap 的 piece 置位，并对有 gap 的 piece 把当前 `BlockSize`（190 KiB）下整块已下载区间写入 `DownloadedBlocks`。半块/被 gap 切开的块不计入。`transferredFromResume` 计入这些块。`ExportPartMet` 仍只由显式 API 调用，日常续传仍走 `client_state.go`。未改 180 KiB 常量。 | 从 eMule/aMule 二进制 `.part.met` 接管任务时，未完成分片里已下完的整块不再丢失。异常退出前未手动导出时二进制文件仍可能过期。 | 中高 | 已有多 gap、半块拒绝、尾片短块、空/全文件 gap、eMule 二进制部分 gap 导入、损坏/未知格式拒绝、导出再导入保留块、完成量统计，以及导入块不与原 gap 重叠的断言。自动节流写出与崩溃恢复属后续独立 PR。 |
+| **`.part.met` 精确导入与运行时自动写出已覆盖** | `resumeFromGaps` 对无 gap 的 piece 置位，并对有 gap 的 piece 把当前 `BlockSize`（190 KiB）下整块已下载区间写入 `DownloadedBlocks`。`Client` 在创建任务、节流周期和 `Stop` 时原子写出 `.part.met`；`writePartMetAtomic` 先写 `.tmp` 再替换，导入前 `recoverPartMetSidecar` 提升合法 tmp、删除损坏 tmp，不覆盖已有合法文件。日常 `client_state.go` 仍保存自身状态。未改 180 KiB 常量。 | 交叉接管保留整块进度；异常退出后仍可用旁注 `.part.met` 恢复到最近一次节流写出。小于 `BlockSize` 的尾部仍可能丢失。 | 中高 | 已有多 gap、半块拒绝、尾片短块、空/全文件 gap、eMule 二进制部分 gap 导入、损坏/未知格式拒绝、导出再导入保留块、完成量统计、导入块不与原 gap 重叠，以及原子替换、tmp 提升/丢弃、节流跳过、Stop 强制写出测试。 |
 | **AICH 根哈希主动请求已覆盖；MultiPacket 捆绑与真实联调仍待后续** | 收到匹配的 `FileStatusAnswer`/`HashSetAnswer` 后，若对端 Hello `AICHVersion!=0` 且任务尚无根，连接会发送一次 `OP_AICHFILEHASHREQ`（0x9E）。`AICHFileHashAnswer` 拒绝文件 hash 不匹配、零根和冲突根，只接受首次合法根；`SetAICHRootHash` 不覆盖已有根。缺根时坏片仍整片重下，同时向 AICH 来源补请求根，避免无应答时永久挂起。根到达后对已挂起的块哈希请求按连接串行派出（每个连接同时只挂一个 `pendingAICHPiece`）。不把根请求塞进 MultiPacket。 | 链接或状态未带 AICH 根时，可在握手阶段补齐根；之后坏片才能走 AICH 局部恢复。根未到之前的坏片回落整片重下。对端不回答则该连接不再重试根请求，其他 AICH 来源仍可请求。 | 中 | 已有状态机测试：缺根 FileStatus 请求一次、无 AICH/已有根/hash 不匹配不请求、应答保存/拒绝/冲突、根到达后补块哈希、缺根坏片不挂起、忙连接不覆盖分片索引。仍需真实 eMule/aMule 联调；MultiPacket 内嵌根请求属独立项。 |
 | **MultiPacket EXT2 线格式未经真实协议证明** | `protocol/client/multipacket.go` 将完整已编码帧整体 zlib 压缩；测试只做本实现 Pack/Unpack 自洽。`peer_connection_p1.go:tryCoalesceOutgoingMultiPacket` 为空，出站禁用。 | 本地往返通过不能证明符合 eMule 线格式；贸然开启可能导致解包失败、连接中断或与 CryptLayer 时序冲突。 | 高 | 先收集 eMule/aMule golden 抓包和源码定义，建立单向 fixture 测试，不能只做自身 round-trip；分别覆盖明文、CryptLayer、半包、尾随帧和未知子包，再决定是否启用出站。 |
 | **Windows/macOS 稀疏、预分配和 Windows 文件名规则缺口** | `disk/preallocate_linux.go` 仅 Linux 使用 `fallocate`；`disk/preallocate_stub.go` 在所有非 Linux 平台静默成功但不执行真实预分配/稀疏标记。`transfer_path.go` 和 `client.go:AddLink` 直接以远端文件名 `filepath.Join`，未见 Windows 保留名、非法字符和尾随点空格清洗。 | 配置显示成功但磁盘策略未生效；恶意或不合法 ED2K 文件名可能创建失败、路径行为不一致或任务无法恢复。 | 中高 | Windows 使用系统稀疏/分配 API、macOS 使用可证明的预分配路径；分别检查实际分配块数。为 `CON`、`NUL`、冒号、反斜杠、尾随点空格、重复名和超长名建立跨平台测试。 |
@@ -74,7 +74,7 @@
 7. **Kad 发布类型（已覆盖 Kad4）**：根据 `clientID`/`IsLowID` 生成 SourceType=1/2 与 client ID 标签。KADV6 LowID 仅跳过 HighID 源发布，完整 IPv6 LowID 标签待后续。
 8. **Server Login 扩展标签（已覆盖官方能力位）**：按 aMule `ServerConnect.cpp` 只保留 4 个 Login 标签，并在 CryptLayer 开关打开时写入 `SRVCAP_*CRYPT`。文档原先假设应上报 UDP/混淆端口，但官方 Login 并不发送这些标签；客户端 UDP 走 Hello，服务器混淆端口走 IdChange/`server.met`。真实服务器联调仍待后续。
 9. **`.part.met` 精确导入（已覆盖整块进度）**：二进制 gap 转为完成 piece 与 `DownloadedBlocks`；半块不计入。不同时引入自动写入。
-10. **`.part.met` 自动维护**：在已验证精确模型上增加节流、原子写和崩溃恢复。
+10. **`.part.met` 自动维护（已覆盖节流与崩溃恢复）**：创建/脏进度/Stop 原子写出；合法 `.tmp` 可恢复，损坏 `.tmp` 不覆盖旧文件。未改 180 KiB。
 11. **AICH 根请求闭环（已覆盖）**：缺根时向宣告 AICH 的来源发送 `OP_AICHFILEHASHREQ`，校验后保存首次根；块哈希按连接串行请求。缺根坏片不挂起。不覆盖已有根，不启用 MultiPacket 捆绑。
 12. **MultiPacket 真实线协议核对**：先 fixture/抓包；出站启用必须是后续单独 PR。
 13. **跨平台文件 PR 组**：Windows 稀疏/预分配、macOS 预分配、文件名清洗分别提交。
