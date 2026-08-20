@@ -2,6 +2,7 @@ package goed2k
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,6 +177,38 @@ func TestLoadStateAppliesDownloadLimiter(t *testing.T) {
 	if rate != 64*1024 {
 		t.Fatalf("limiter rateBps=%v, want %d", rate, 64*1024)
 	}
+}
+
+func TestAutoSaveFailureIsObservable(t *testing.T) {
+	client := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, client)
+	client.SetStateStore(&failingClientStateStore{err: errors.New("disk full")})
+	if err := client.saveStateIfConfigured(); err == nil {
+		t.Fatal("expected save error")
+	}
+	got := client.LastAutoSaveError()
+	if got == nil || !strings.Contains(got.Error(), "disk full") {
+		t.Fatalf("LastAutoSaveError=%v", got)
+	}
+	client.SetStateStore(&memoryClientStateStore{})
+	if err := client.saveStateIfConfigured(); err != nil {
+		t.Fatal(err)
+	}
+	if client.LastAutoSaveError() != nil {
+		t.Fatalf("success should clear last error: %v", client.LastAutoSaveError())
+	}
+}
+
+type failingClientStateStore struct {
+	err error
+}
+
+func (f *failingClientStateStore) Load() (*ClientState, error) {
+	return nil, f.err
+}
+
+func (f *failingClientStateStore) Save(*ClientState) error {
+	return f.err
 }
 
 func TestEphemeralSettingsStayProcessLocal(t *testing.T) {
