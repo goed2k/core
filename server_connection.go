@@ -144,10 +144,22 @@ func (s *ServerConnection) SendSearchMore() {
 
 func (s *ServerConnection) SendLoginRequest() {
 	debugPeerf("server %s -> LoginRequest", s.identifier)
-	packet := serverproto.NewLoginRequest(s.session.GetUserAgent(), s.session.GetListenPort(), s.session.GetClientName())
+	packet := newSessionLoginRequest(s.session)
 	if raw, err := s.combiner.Pack("server.LoginRequest", &packet); err == nil {
 		s.QueuePacket(raw)
 	}
+}
+
+func newSessionLoginRequest(session *Session) serverproto.LoginRequest {
+	if session == nil {
+		return serverproto.NewLoginRequest(protocol.Invalid, 0, "")
+	}
+	return serverproto.NewLoginRequestWith(
+		session.GetUserAgent(),
+		session.GetListenPort(),
+		session.GetClientName(),
+		session.loginRequestOptions(),
+	)
 }
 
 func (s *ServerConnection) SendCallbackRequest(clientID int32) {

@@ -296,6 +296,56 @@ func (s *Session) GetUDPPort() int {
 	return s.settings.UDPPort
 }
 
+func (s *Session) loginRequestOptions() serverproto.LoginRequestOptions {
+	if s == nil {
+		return serverproto.LoginRequestOptions{}
+	}
+	return serverproto.LoginRequestOptions{
+		UDPPort:            s.advertisedUDPPort(),
+		ObfuscationTCPPort: s.advertisedObfuscationTCPPort(),
+		EnableCryptLayer:   s.settings.EnableCryptLayer,
+		CryptLayerRequired: s.settings.CryptLayerRequired,
+	}
+}
+
+func (s *Session) advertisedUDPPort() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dhtTracker != nil {
+		if port := s.dhtTracker.ListenPort(); port > 0 && port <= 65535 {
+			return port
+		}
+	}
+	if s.serverStatUDPConn != nil {
+		if addr, ok := s.serverStatUDPConn.LocalAddr().(*net.UDPAddr); ok && addr.Port > 0 && addr.Port <= 65535 {
+			return addr.Port
+		}
+	}
+	port := s.settings.UDPPort
+	if port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
+}
+
+func (s *Session) advertisedObfuscationTCPPort() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.settings.EnableCryptLayer && !s.settings.CryptLayerRequired {
+		return 0
+	}
+	if s.obfListener != nil {
+		if addr, ok := s.obfListener.Addr().(*net.TCPAddr); ok && addr.Port > 0 {
+			return addr.Port
+		}
+	}
+	port := s.obfuscationListenPortLocked()
+	if port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
+}
+
 func (s *Session) GetClientName() string {
 	return s.settings.ClientName
 }

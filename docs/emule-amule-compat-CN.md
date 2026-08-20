@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `9af5f8b`（2026-08-20 审查，含标准客户端 UDP ReAsk 基础格式）。
+- **基线**：`main` 分支提交 `2512a6b`（2026-08-20 审查，含 Kad LowID 消费/发布与标准客户端 UDP ReAsk）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -43,7 +43,7 @@
 
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
-| **Server Login 标签不完整** | `protocol/server/login_request.go:NewLoginRequest` 只写版本、能力、名称和 eMule 版本；`Settings` 已有 `UDPPort`、`ObfuscationTCPPort`，但 LoginRequest 未传入或编码对应标签。 | 服务器无法获得完整 UDP/混淆端口能力，可能降低 UDP 服务发现和混淆回连成功率。 | 中 | 对照 eMule/aMule 登录 golden bytes；按能力开关验证标签出现条件，并在支持扩展标签的真实服务器检查 IdChange/回连行为。 |
+| **Server Login 扩展标签已覆盖条件上报；真实服务器联调仍待后续** | `NewLoginRequestWith` 在端口 > 0 时写入 `ET_UDPPORT`（0x21）；CryptLayer 启用且混淆 TCP 端口 > 0 时写入 `ST_TCPPORTOBFUSCATION`（0x97），并按 aMule `ServerConnect.cpp` 置位 `SRVCAP_SUPPORTCRYPT/REQUESTCRYPT/REQUIRECRYPT`。端口 0、未启用混淆或非法端口不上报。不声明 `CapableIPInLogin`（登录 IP 仍为 0）。0x24 是 Hello `ET_COMMENTS`，不用于 Login。`SendLoginRequest` 从 Session 实际/配置端口填充。官方 eMule/aMule Login 本身不写混淆端口标签，0x97 采用 opcodes.h 中该语义的官方 ID，未知标签会被服务器忽略。 | 支持扩展标签的服务器可登记 UDP 与混淆 TCP 端口及 CryptLayer 能力，改善 UDP 发现与混淆回连。未启用或端口为 0 时行为与旧 Login 一致。 | 中 | 已有表驱动覆盖无/有 UDP、无/有混淆、端口 0、未启用却配置端口，以及 Put/Get 与组包往返、小端字节序。仍需在支持扩展标签的真实服务器检查 IdChange/回连。 |
 | **`.part.met` 不是下载中的自动兼容状态源** | `part_met.go:ExportPartMet` 仅由显式 API 调用；日常续传主要走 `client_state.go`。`resumeFromGaps` 对二进制导入只标记完全没有 gap 的 piece，不构造 `DownloadedBlocks`，因此部分 piece 的已下载区间会丢失。 | 与 eMule/aMule 交叉接管任务时会丢部分进度；异常退出前未手动导出时二进制 `.part.met` 可能过期。 | 中高 | 从带多段 gap 的真实 `.part.met` 导入并逐字节核对保留区间；在分片/块完成和节流周期原子更新；模拟崩溃恢复及双客户端交叉续传。 |
 | **AICH 根哈希只应答，不主动获取** | `peer_connection.go` 注册并处理 `AICHFileHashRequest/Answer`，可发送根哈希 Answer；未见发送 `AICHFileHashRequest` 的调用。已有根哈希后，`transfer.go:requestAICHRecovery` 才会主动请求 piece 块哈希。 | 链接或状态未携带 AICH 根时，客户端无法自行补齐根哈希，AICH 恢复链路无法启动。 | 中 | 增加“缺根→向支持 AICH 的 peer 请求→校验并保存→坏片时请求块哈希”的状态机测试；拒绝 hash/file 不匹配及冲突根；与真实客户端联调。 |
 | **MultiPacket EXT2 线格式未经真实协议证明** | `protocol/client/multipacket.go` 将完整已编码帧整体 zlib 压缩；测试只做本实现 Pack/Unpack 自洽。`peer_connection_p1.go:tryCoalesceOutgoingMultiPacket` 为空，出站禁用。 | 本地往返通过不能证明符合 eMule 线格式；贸然开启可能导致解包失败、连接中断或与 CryptLayer 时序冲突。 | 高 | 先收集 eMule/aMule golden 抓包和源码定义，建立单向 fixture 测试，不能只做自身 round-trip；分别覆盖明文、CryptLayer、半包、尾随帧和未知子包，再决定是否启用出站。 |
@@ -72,7 +72,7 @@
 5. **180 KiB 边界审计与迁移**：先提交边界清单/测试，再在单独 PR 改全链路常量；如证据否定变更则关闭实现 PR 并更新本文。
 6. **Kad LowID 消费链路（已覆盖服务器回调）**：`SourceInfo` 保留 SourceType；HighID 直连，LowID 进入既有 `RequestServerCallback`/`Policy` 路径。Buddy 隧道仍属第 16 项。
 7. **Kad 发布类型（已覆盖 Kad4）**：根据 `clientID`/`IsLowID` 生成 SourceType=1/2 与 client ID 标签。KADV6 LowID 仅跳过 HighID 源发布，完整 IPv6 LowID 标签待后续。
-8. **Server Login 扩展标签**：补齐 UDP/混淆端口及条件能力标签。
+8. **Server Login 扩展标签（已覆盖条件上报）**：UDP 用 `ET_UDPPORT`（0x21）；混淆 TCP 端口在 CryptLayer 启用且端口非 0 时用 `ST_TCPPORTOBFUSCATION`（0x97）；能力位按 aMule 增加 `SRVCAP_*CRYPT`。不谎报端口 0，不声明 `CapableIPInLogin`，不把 0x24 当混淆端口。真实服务器联调仍待后续。
 9. **`.part.met` 精确导入**：先保留部分 piece 区间；不同时引入自动写入。
 10. **`.part.met` 自动维护**：在已验证精确模型上增加节流、原子写和崩溃恢复。
 11. **AICH 根请求闭环**：只处理主动获取、校验和状态保存。
