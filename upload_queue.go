@@ -17,7 +17,8 @@ const (
 )
 
 // uploadWaiter 是上传等待队列的稳定身份。
-// 有有效 UserHash 时，TCP 断开只分离连接，不删除排队记录。
+// TCP 断开后仍保留 rank / lastAsked / 文件 hash / IP / UDP / UserHash（若已有），
+// 以便同一对端重连或 UDP ReAsk 续上原来的排队位置。
 type uploadWaiter struct {
 	userHash       protocol.Hash
 	fileHash       protocol.Hash
@@ -166,7 +167,7 @@ func (q *UploadQueue) onClientDisconnect(client *PeerConnection) {
 		client.SetUploadState(UploadStateNone)
 		client.ClearUploadBlockRequests()
 	}
-	w := q.findWaiter(client)
+	w := q.findAttachedWaiter(client)
 	if w == nil {
 		return
 	}
@@ -462,26 +463,31 @@ func (q *UploadQueue) SuspendUpload(hash protocol.Hash, terminate bool) uint16 {
 	return removed
 }
 
-func (q *UploadQueue) findWaiter(client *PeerConnection) *uploadWaiter {
+func (q *UploadQueue) findAttachedWaiter(client *PeerConnection) *uploadWaiter {
 	if q == nil || client == nil {
 		return nil
 	}
 	for _, waiter := range q.waiting {
-		if waiter == nil {
-			continue
-		}
-		if waiter.client == client {
+		if waiter != nil && waiter.client == client {
 			return waiter
 		}
 	}
-	if !uploadIdentityHash(client).Equal(protocol.Invalid) {
-		for _, waiter := range q.waiting {
-			if waiter == nil || waiter.boundToConn {
-				continue
-			}
-			if waiter.userHash.Equal(client.remoteHash) {
-				return waiter
-			}
+	return nil
+}
+
+func (q *UploadQueue) findWaiter(client *PeerConnection) *uploadWaiter {
+	if attached := q.findAttachedWaiter(client); attached != nil {
+		return attached
+	}
+	if client == nil || uploadIdentityHash(client).Equal(protocol.Invalid) {
+		return nil
+	}
+	for _, waiter := range q.waiting {
+		if waiter == nil || waiter.boundToConn {
+			continue
+		}
+		if waiter.userHash.Equal(client.remoteHash) {
+			return waiter
 		}
 	}
 	return nil
@@ -549,15 +555,13 @@ func (w *uploadWaiter) captureFromClient(client *PeerConnection) {
 	}
 	hash := uploadIdentityHash(client)
 	w.userHash = hash
-	w.boundToConn = hash.Equal(protocol.Invalid)
-	if src := client.ActiveUploadSource(); src != nil {
-		w.fileHash = src.GetHash()
-	}
+	w.fileHash = uploadFileHash(client)
 	w.endpoint = client.Endpoint()
 	w.udpPort = clientAdvertisedUDPPort(client)
 	w.lowID = client.IsUploadLowID()
 	w.friendSlot = client.FriendSlot()
 	w.addNextConnect = w.addNextConnect || client.UploadAddNextConnect()
+	w.boundToConn = hash.Equal(protocol.Invalid)
 }
 
 func (w *uploadWaiter) attach(client *PeerConnection) {
@@ -612,7 +616,7 @@ func (w *uploadWaiter) score(session *Session) uint32 {
 		return 0
 	}
 	base := float64(CurrentTime()-waitStart) / 1000.0
-	if session != nil && session.Credits() != nil {
+	if session != nil && session.Credits() != nil && !w.userHash.Equal(protocol.Invalid) {
 		base *= session.Credits().ScoreRatio(w.userHash)
 	}
 	if base < 0 {
@@ -643,6 +647,16 @@ func uploadIdentityHash(client *PeerConnection) protocol.Hash {
 	return client.remoteHash
 }
 
+func uploadFileHash(client *PeerConnection) protocol.Hash {
+	if client == nil {
+		return protocol.Invalid
+	}
+	if src := client.ActiveUploadSource(); src != nil {
+		return src.GetHash()
+	}
+	return protocol.Invalid
+}
+
 func clientAdvertisedUDPPort(client *PeerConnection) uint16 {
 	if client == nil {
 		return 0
@@ -660,13 +674,20 @@ func uploadWaiterMatchesUDP(waiter *uploadWaiter, addr *net.UDPAddr) bool {
 	if waiter.client != nil {
 		return uploadClientMatchesUDP(waiter.client, addr)
 	}
+	return uploadEndpointMatchesUDP(waiter.endpoint, waiter.udpPort, addr)
+}
+
+func uploadEndpointMatchesUDP(endpoint protocol.Endpoint, udpPort uint16, addr *net.UDPAddr) bool {
+	if addr == nil || udpPort == 0 || !endpoint.Defined() {
+		return false
+	}
 	ip4 := addr.IP.To4()
-	if ip4 == nil || waiter.udpPort == 0 || !waiter.endpoint.Defined() {
+	if ip4 == nil {
 		return false
 	}
-	want := protocol.EndpointFromInet(&net.TCPAddr{IP: ip4, Port: waiter.endpoint.Port()})
-	if waiter.endpoint.IP() != want.IP() {
+	want := protocol.EndpointFromInet(&net.TCPAddr{IP: ip4, Port: endpoint.Port()})
+	if endpoint.IP() != want.IP() {
 		return false
 	}
-	return int(waiter.udpPort) == addr.Port
+	return int(udpPort) == addr.Port
 }

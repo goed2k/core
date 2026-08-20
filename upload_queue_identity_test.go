@@ -2,6 +2,7 @@ package goed2k
 
 import (
 	"bytes"
+	"net"
 	"testing"
 
 	"github.com/goed2k/core/protocol"
@@ -188,19 +189,91 @@ func TestUploadQueueFullStillAcceptsExistingIdentity(t *testing.T) {
 	}
 }
 
-func TestUploadQueueDropsConnectionBoundWaiterOnDisconnect(t *testing.T) {
+func TestUploadQueueDropsWaiterWithoutStableIdentity(t *testing.T) {
+	session, transfer := newUploadableTestTransfer(t)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	conn := newQueuedUploadPeer(t, session, transfer, "10.0.0.8", 4662, protocol.Invalid, 0)
+	queue.AddClientToQueue(conn)
+	if !queue.IsOnUploadQueue(conn) {
+		t.Fatal("无稳定标识时仍应按连接入队")
+	}
+	queue.onClientDisconnect(conn)
+	if len(queue.waiting) != 0 {
+		t.Fatal("既无 UserHash 也无 UDP 端口的等待项在断开后不得残留")
+	}
+}
+
+func TestUploadQueueDropsConnectionBoundWaiterEvenWithUDPPort(t *testing.T) {
 	session, transfer := newUploadableTestTransfer(t)
 	queue := session.UploadQueue()
 	fillUploadSlots(queue)
 
 	conn := newQueuedUploadPeer(t, session, transfer, "10.0.0.8", 4662, protocol.Invalid, 4672)
 	queue.AddClientToQueue(conn)
-	if !queue.IsOnUploadQueue(conn) {
-		t.Fatal("无 UserHash 时仍应按连接入队")
-	}
 	queue.onClientDisconnect(conn)
 	if len(queue.waiting) != 0 {
-		t.Fatal("没有稳定 UserHash 的等待项在断开后不得残留")
+		t.Fatal("没有 UserHash 时即使有 UDP 端口也不得跨连接保留排队身份")
+	}
+}
+
+func TestUploadUDPReaskFileNotFoundAndQueueFullAfterDisconnect(t *testing.T) {
+	session, transfer, local, remote, peerAddr := newUDPReaskLoopback(t)
+	defer local.Close()
+	defer remote.Close()
+	session.settings.UploadQueueSize = 1
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	endpoint, err := protocol.EndpointFromString("127.0.0.1", 4662)
+	if err != nil {
+		t.Fatalf("构造地址失败: %v", err)
+	}
+	peer := NewPeerWithSource(endpoint, true, int(PeerIncoming))
+	peer.UDPPort = uint16(peerAddr.Port)
+	conn := NewPeerConnection(session, endpoint, transfer, &peer)
+	conn.remoteHash = userHash
+	queue.AddClientToQueue(conn)
+	queue.onClientDisconnect(conn)
+
+	unknown := protocol.MustHashFromString("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+	session.handleClientUDP(peerAddr, encodeReaskFilePing(unknown))
+	if pkt := readUDPPacket(t, remote); !bytes.Equal(pkt, encodeFileNotFound()) {
+		t.Fatalf("未知文件应回 FileNotFound: got % X", pkt)
+	}
+
+	stranger, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("监听陌生 UDP 失败: %v", err)
+	}
+	defer stranger.Close()
+	session.handleClientUDP(stranger.LocalAddr().(*net.UDPAddr), encodeReaskFilePing(transfer.GetHash()))
+	if pkt := readUDPPacket(t, stranger); !bytes.Equal(pkt, encodeQueueFull()) {
+		t.Fatalf("队列将满且非等待者应回 QueueFull: got % X", pkt)
+	}
+}
+
+func TestOldConnectionDisconnectDoesNotDetachReconnectedWaiter(t *testing.T) {
+	session, transfer := newUploadableTestTransfer(t)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("99999999999999999999999999999999")
+	first := newQueuedUploadPeer(t, session, transfer, "10.0.0.10", 4662, userHash, 4672)
+	queue.AddClientToQueue(first)
+	waitStart := first.UploadWaitStart()
+	queue.onClientDisconnect(first)
+
+	second := newQueuedUploadPeer(t, session, transfer, "10.0.0.10", 4663, userHash, 4672)
+	queue.AddClientToQueue(second)
+	first.OnDisconnect(QueueRanking)
+	if len(queue.waiting) != 1 || queue.waiting[0].client != second {
+		t.Fatal("旧连接延迟断开不得拆掉已重连的新等待项")
+	}
+	if second.UploadWaitStart() != waitStart {
+		t.Fatalf("旧连接断开后等待起点被改动: got=%d want=%d", second.UploadWaitStart(), waitStart)
 	}
 }
 
