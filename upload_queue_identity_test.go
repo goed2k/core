@@ -307,6 +307,27 @@ func TestOldConnectionDisconnectDoesNotDetachReconnectedWaiter(t *testing.T) {
 	}
 }
 
+func TestUploadQueueRejectsStealOfLiveWaiter(t *testing.T) {
+	session, transfer := newUploadableTestTransfer(t)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("ABABABABABABABABABABABABABABABAB")
+	owner := newQueuedUploadPeer(t, session, transfer, "10.0.0.11", 4662, userHash, 4672)
+	queue.AddClientToQueue(owner)
+	waitStart := owner.UploadWaitStart()
+	rank := owner.UploadQueueRank()
+
+	thief := newQueuedUploadPeer(t, session, transfer, "10.0.0.12", 4662, userHash, 4673)
+	queue.AddClientToQueue(thief)
+	if len(queue.waiting) != 1 || queue.waiting[0].client != owner {
+		t.Fatal("已附着的等待身份不得被同 UserHash 的另一连接抢占")
+	}
+	if owner.UploadWaitStart() != waitStart || owner.UploadQueueRank() != rank {
+		t.Fatal("被抢占尝试后原等待项的起点或 rank 被改动")
+	}
+}
+
 func TestOnDisconnectParksPersistentWaitIdentity(t *testing.T) {
 	session, transfer := newUploadableTestTransfer(t)
 	queue := session.UploadQueue()

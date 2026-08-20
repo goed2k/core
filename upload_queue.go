@@ -62,6 +62,11 @@ func (q *UploadQueue) AddClientToQueue(client *PeerConnection) {
 	now := CurrentTime()
 	client.lastUploadRequest = now
 	if w := q.findWaiter(client); w != nil {
+		if w.client != nil && w.client != client {
+			// 已有另一条活连接附着时不得被同 UserHash 的新连接抢占。
+			client.SendQueueRanking(w.rank)
+			return
+		}
 		w.attach(client)
 		w.lastAsked = now
 		w.captureFromClient(client)
@@ -488,6 +493,8 @@ func (q *UploadQueue) findWaiter(client *PeerConnection) *uploadWaiter {
 	if client == nil || uploadIdentityHash(client).Equal(protocol.Invalid) {
 		return nil
 	}
+	// Hello UserHash 未经 SecIdent 证明，这与 eMule 上传队列一致；
+	// 活连接附着期间禁止被另一条同哈希连接抢占，见 AddClientToQueue。
 	for _, waiter := range q.waiting {
 		if waiter == nil || waiter.boundToConn {
 			continue
