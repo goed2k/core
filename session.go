@@ -10,6 +10,7 @@ import (
 	"github.com/goed2k/core/internal/logx"
 	"github.com/goed2k/core/protocol"
 	kadproto "github.com/goed2k/core/protocol/kad"
+	kadv6proto "github.com/goed2k/core/protocol/kadv6"
 	serverproto "github.com/goed2k/core/protocol/server"
 )
 
@@ -857,40 +858,80 @@ func (s *Session) sendSearchRequest(task *searchTask, params SearchParams) bool 
 }
 
 func (s *Session) startDHTSearch(task *searchTask, params SearchParams) bool {
-	if s.dhtTracker == nil {
-		return false
-	}
 	keyword := pickKadKeyword(params.Query)
 	if keyword == "" {
 		return false
 	}
-	task.mu.Lock()
-	task.kadKeyword = keyword
-	task.dhtBusy = true
-	task.updatedAt = CurrentTime()
-	task.mu.Unlock()
 	keywordHash, err := protocol.HashFromData([]byte(keyword))
 	if err != nil {
-		task.finishDHT()
 		return false
 	}
+	task.mu.Lock()
+	task.kadKeyword = keyword
+	task.updatedAt = CurrentTime()
+	task.mu.Unlock()
 
-	return s.dhtTracker.SearchKeywords(keywordHash, func(entries []kadproto.SearchEntry) {
-		s.searchMu.Lock()
-		current := s.activeSearch
-		s.searchMu.Unlock()
-		if current == nil || current != task {
-			return
-		}
-		for _, entry := range entries {
-			result := makeSearchResultFromKAD(entry)
-			if !matchesSearchFilters(result, params) {
-				continue
+	kad4Attempt := s.dhtTracker != nil
+	v6Attempt := s.dhtv6Tracker.hasSearchContacts()
+	if !kad4Attempt && !v6Attempt {
+		return false
+	}
+	// 先为两路占位，避免 Kad4 启动失败把任务标成 Finished 后再启动 KADV6。
+	if kad4Attempt {
+		task.beginDHT()
+	}
+	if v6Attempt {
+		task.beginDHT()
+	}
+	kad4OK := false
+	if kad4Attempt {
+		kad4OK = s.dhtTracker.SearchKeywords(keywordHash, func(entries []kadproto.SearchEntry) {
+			s.searchMu.Lock()
+			current := s.activeSearch
+			s.searchMu.Unlock()
+			if current == nil || current != task {
+				return
 			}
-			task.mergeResult(result)
-		}
+			for _, entry := range entries {
+				result := makeSearchResultFromKAD(entry)
+				if !matchesSearchFilters(result, params) {
+					continue
+				}
+				task.mergeResult(result)
+			}
+			task.finishDHT()
+		})
+	}
+	v6OK := false
+	if v6Attempt {
+		v6OK = s.dhtv6Tracker.SearchKeywords(keywordHash, func(entries []kadv6proto.SearchEntry) {
+			s.applyKADV6KeywordResults(task, params, entries)
+			task.finishDHT()
+		})
+	}
+	if kad4Attempt && !kad4OK {
 		task.finishDHT()
-	})
+	}
+	if v6Attempt && !v6OK {
+		task.finishDHT()
+	}
+	return kad4OK || v6OK
+}
+
+func (s *Session) applyKADV6KeywordResults(task *searchTask, params SearchParams, entries []kadv6proto.SearchEntry) {
+	s.searchMu.Lock()
+	current := s.activeSearch
+	s.searchMu.Unlock()
+	if current == nil || current != task {
+		return
+	}
+	for _, entry := range entries {
+		result := makeSearchResultFromKADV6(entry)
+		if !matchesSearchFilters(result, params) {
+			continue
+		}
+		task.mergeResult(result)
+	}
 }
 
 func (s *Session) OnServerSearchResult(sc *ServerConnection, result *serverproto.SearchResult) {

@@ -55,7 +55,7 @@
 
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
-| **高级搜索：Server 最小布尔树已覆盖；KADV6 统一搜索仍待接入** | `SearchRequest` 解析 `OR`/`NOT`/`-word`，左结合默认 AND；过滤条件仍 AND 到查询树上。不支持括号嵌套。默认 AND 词仍按原标点切开；OR/NOT/`-word` 操作数保持整词。Kad 关键字取正向词中最长者，跳过 AND/OR/NOT 与 NOT 操作数。`startDHTSearch` 仍只走 Kad4；`SearchDHTv6Keywords` 未纳入 `StartSearch`。 | 服务器搜索可表达简单 OR/排除；括号复杂式仍不一致。IPv6-only 结果仍不出现在常规搜索。 | 中高 | 已有 OR/NOT/`-word`、默认 AND 标点分词、布尔操作数保持整词、过滤条件仍 AND、Kad 跳过排除词测试。括号/引号与 KADV6 合并为后续项。 |
+| **高级搜索：Server 最小布尔与 KADV6 纳入 StartSearch 已覆盖；括号仍待后续** | `SearchRequest` 解析 `OR`/`NOT`/`-word`，左结合默认 AND；过滤条件仍 AND。`SearchScopeDHT`/`All` 在 tracker 可用时同时启动 Kad4 与 KADV6 `SearchKeywords`，按文件 hash 合并去重，共用 `SearchResultKAD`。无节点时不拨号、不把 DHT 标忙。括号/引号仍不做。 | 常规搜索可合并 IPv6 关键字命中。复杂括号式仍与 eMule 不一致。 | 中高 | 已有 OR/NOT 编码、KADV6 标签转换、Kad4/KADV6 去重、MaxSize 过滤、空 tracker 不忙、双后端 pending 测试。不依赖公网/本机 IPv6。 |
 | **Buddy/PeerCache 生命周期缺失** | `protocol/kad/` 有 Buddy 相关标签/报文，`session_callback.go` 有部分 callback/find buddy 路径；未见完整 Buddy 选举、保活、重连状态机，也未见 PeerCache 实现。 | LowID/NAT 场景回调可靠性和缓存加速能力低于完整客户端。 | 高 | 双 NAT/LowID 环境做 Buddy 建立、失效、替换和回调测试；PeerCache 需先按独立威胁模型与真实协议 fixture 验证。 |
 | **Kad2 与 Kad4↔KADV6 桥接缺失** | `protocol/kad/` 与 `protocol/kadv6/` 是独立实现；`docs/kadv6-protocol*.md` 明确当前无桥接，仓库未见 Kad2 状态机。 | 无法参与对应网络或跨叠加层共享来源。 | 很高 | 先形成协议设计和安全边界 RFC；使用独立互操作节点验证路由、发布、搜索、去环和隐私，不与其他 P0/P1 改动同 PR。 |
 | **`NNN.part` 完成后重命名已覆盖最小闭环** | 仅 `UseEmuleTempLayout`：`finished()` 只排队 `AsyncRelease`；`OnReleaseFile` 在句柄关闭后把 `001`–`999.part` 搬到 Settings 已有 `IncomingDir`（空则 part 所在目录，不发明默认路径）。目标已存在一律 `name (n).ext`，不按同大小当崩溃重试。同卷 `Rename`，仅 EXDEV/Windows 跨卷回退 copy（Linux errno 17 不当跨卷）。旁注删除 `.met` / `.part.met`。`FinalName` 随 state 保存。恢复已完成 `.part` 会再 promote。未做跨卷事务日志或 Windows 占用重试队列。 | 临时布局完成后不再长期停在 `001.part`。目标冲突不覆盖已有文件。未完成释放不搬运。 | 中 | 已有同目录改名、Incoming 冲突、同大小不覆盖、EXDEV copy、非跨卷失败保留源、`finished()` 须等释放、关闭布局不搬、恢复已完成 `.part`、未完成不搬、Linux EEXIST 测试。 |
@@ -80,7 +80,7 @@
 13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
 14. **KADV6 真实 IPv6 CI（单测已不依赖本机公网 IPv6）**：发布端点可注入，`TestMain` 默认禁用公网探测；可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 仍走真实出站地址。公网 bootstrap/远端搜索的专用 job 仍待后续。
 15. **Settings/state 一致性（已覆盖可持久化策略）**：Config/env/CLI 映射与 v8 快照/恢复、从未发布的 5/6 按 v7 兼容升级、自动保存失败可观测且按间隔重试。过程调优字段仍刻意不持久化。
-16. **P2 项目**：Server 最小布尔搜索（OR/NOT/`-word`）已覆盖；KADV6 纳入 `StartSearch`、括号/引号、Buddy/PeerCache、Kad2/桥接、互操作/fuzz 各自立项，不共享实现 PR。`NNN.part` 完成搬运已覆盖最小闭环。MultiPacket EXT2 出站已核对并明确不做。
+16. **P2 项目**：Server 最小布尔搜索与 KADV6 纳入 `StartSearch` 已覆盖；括号/引号、Buddy/PeerCache、Kad2/桥接、互操作/fuzz 各自立项，不共享实现 PR。`NNN.part` 完成搬运已覆盖最小闭环。MultiPacket EXT2 出站已核对并明确不做。
 
 ## 7. 多轮审计门禁
 

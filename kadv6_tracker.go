@@ -180,6 +180,15 @@ func (t *KADV6Tracker) SearchSources(hash protocol.Hash, size int64, cb func([]k
 	return t.node.searchSources(hash, size, cb)
 }
 
+func (t *KADV6Tracker) hasSearchContacts() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.nodes) > 0 || len(t.table.RouterNodes()) > 0
+}
+
 func (t *KADV6Tracker) SearchKeywords(hash protocol.Hash, cb func([]kadv6proto.SearchEntry)) bool {
 	if cb == nil {
 		return false
