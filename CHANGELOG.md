@@ -13,16 +13,17 @@
 - `disk.PreallocateSemantics`：公开当前平台预分配真实能力（Linux fallocate / Windows NTFS / 其余仅 Truncate）。
 - Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn；失败仍按间隔重试，避免每 tick 刷盘。
 - KADV6 发布端点支持注入本机 IPv6 探测器；默认 `go test` 用文档地址且禁用公网探测。可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 走真实出站地址。
-- `UseEmuleTempLayout` 任务完成后把 `NNN.part` 重命名到清洗后的最终文件名；`IncomingDir` 来自 eMule 配置或 Settings，空则留在临时目录。目标冲突且大小不同时使用 `name (n).ext`，同大小视为崩溃重试。
+- `UseEmuleTempLayout` 任务在释放文件句柄后把 `NNN.part` 搬到清洗后的最终文件名。目标目录优先已接入 Settings 的 `IncomingDir`（eMule 导入写入；空则用 part 所在目录，不发明默认 Incoming 路径）。目标已存在则改用 `name (n).ext`，不覆盖。同卷 `Rename`，仅跨卷失败时复制后删源。完成后删除 `.part.met` 旁注。`FinalName` 随任务 state 保存。
 
 ### 变更
 
 - Windows 上 `UseSparseFiles` 会先 `FSCTL_SET_SPARSE` 再 Truncate；`PreallocateDiskSpace` 会设置 `FileAllocationInfo`。非 Linux/Windows 明确只 Truncate，不保证稀疏或占盘。
-- 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.5 MiB 分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
+- 下载块粒度统一为 eMule `EMBLOCKSIZE` 180 KiB：picker / 磁盘偏移 / HTTP Range / `.part.met` / resume 与 AICH 共用同一边界。完整 9.28 MiB（9728000 字节）分片为 53 块（52×180 KiB + 末块 140 KiB）。`ClientState` 升到 v9，旧 190 KiB `DownloadedBlocks` 按字节并集重映射，只保留被完整覆盖的新块；已完成 piece 位图保持。磁盘读写改用 `PieceBlock.FileOffset()`，不再用 `BlocksOffset()*BlockSize`。
 
 ### 修复
 
 - 二进制 `.part.met` 导入会把未完成分片中已下完的整块写入 `DownloadedBlocks`，不再只保留完全没有 gap 的 piece。半块仍丢弃。
+- `UseEmuleTempLayout` 完成搬运改为 `OnReleaseFile` 之后执行，避免未关句柄时改名、换新 handler 却让 PieceManager 仍指向旧路径。目标同大小不再当崩溃重试覆盖/删源。Linux 上 `errno 17`（EEXIST）不再误判为跨卷。
 
 ## [0.1.3] - 2026-08-02
 

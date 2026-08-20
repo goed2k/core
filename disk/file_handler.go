@@ -61,6 +61,17 @@ func (h *DesktopFileHandler) Close() error {
 	return err
 }
 
+// SetPath 在文件已关闭时改写落盘路径（完成后重命名 NNN.part 用）。
+func (h *DesktopFileHandler) SetPath(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.file != nil {
+		return errors.New("cannot set path while file is open")
+	}
+	h.path = path
+	return nil
+}
+
 func (h *DesktopFileHandler) DeleteFile() error {
 	_ = h.Close()
 	if err := os.Remove(h.path); err != nil {

@@ -64,6 +64,31 @@ func TestPreallocateSemanticsMatchesGOOS(t *testing.T) {
 	}
 }
 
+func TestDesktopFileHandlerSetPathRequiresClosed(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "001.part")
+	dest := filepath.Join(dir, "final.bin")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewDesktopFileHandler(src)
+	if handler.File() == nil {
+		t.Fatal("expected open file")
+	}
+	if err := handler.SetPath(dest); err == nil {
+		t.Fatal("open handler must reject SetPath")
+	}
+	if err := handler.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.SetPath(dest); err != nil {
+		t.Fatal(err)
+	}
+	if handler.Path() != dest {
+		t.Fatalf("path %s", handler.Path())
+	}
+}
+
 func TestPreallocateZeroSizeNoop(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.bin")

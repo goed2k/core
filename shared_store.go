@@ -58,6 +58,24 @@ func (st *SharedStore) Remove(hash protocol.Hash) bool {
 	return true
 }
 
+// UpdatePath 更新已有条目的路径与显示名（完成后搬运 NNN.part 时使用）。
+func (st *SharedStore) UpdatePath(hash protocol.Hash, path, name string) bool {
+	if st == nil || hash.Equal(protocol.Invalid) || path == "" {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	f := st.byHash[hash]
+	if f == nil {
+		return false
+	}
+	f.Path = path
+	if name != "" {
+		f.Name = name
+	}
+	return true
+}
+
 // Get 按 hash 查询。
 func (st *SharedStore) Get(hash protocol.Hash) *SharedFile {
 	if st == nil {
