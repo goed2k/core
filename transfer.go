@@ -53,6 +53,7 @@ type Transfer struct {
 	abort              bool
 	handler            disk.FileHandler
 	needSaveResumeData bool
+	resumeDirtyGen     uint64
 	state              TransferState
 	peersInfo          []PeerInfo
 	connections        []*PeerConnection
@@ -128,7 +129,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 		t.restoreResumeData(atp.ResumeData)
 	} else {
 		t.state = Downloading
-		t.needSaveResumeData = true
+		t.markResumeDirty()
 	}
 
 	return t, nil
@@ -387,10 +388,36 @@ func (t *Transfer) ResumeData() *protocol.TransferResumeData {
 	return trd
 }
 
+func (t *Transfer) markResumeDirty() {
+	if t == nil {
+		return
+	}
+	t.needSaveResumeData = true
+	t.resumeDirtyGen++
+}
+
 func (t *Transfer) MarkResumeDataSaved() {
 	if t != nil {
 		t.needSaveResumeData = false
 	}
+}
+
+func (t *Transfer) markResumeSavedIfGen(gen uint64) {
+	if t == nil {
+		return
+	}
+	if t.resumeDirtyGen != gen {
+		t.needSaveResumeData = true
+		return
+	}
+	t.needSaveResumeData = false
+}
+
+func (t *Transfer) ResumeDirtyGen() uint64 {
+	if t == nil {
+		return 0
+	}
+	return t.resumeDirtyGen
 }
 
 func (t *Transfer) snapshotResumeData() *protocol.TransferResumeData {
@@ -642,7 +669,7 @@ func (t *Transfer) PauseWithDisconnect() {
 		}
 	}
 	t.connections = nil
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 }
 
 func (t *Transfer) ResumeWithState() {
@@ -658,7 +685,7 @@ func (t *Transfer) ResumeWithState() {
 	}
 	t.nextSourcesRequest = 0
 	t.nextDHTRequest = 0
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 }
 
 func (t *Transfer) ForceSourceDiscoveryNow() {
@@ -824,7 +851,7 @@ func (t *Transfer) OnBlockWriteCompleted(block data.PieceBlock, _ [][]byte, ec B
 	if ec.Code() == NoError.Code() {
 		t.picker.MarkAsFinished(block)
 		t.QueuePieceHash(block.PieceIndex)
-		t.needSaveResumeData = true
+		t.markResumeDirty()
 		return
 	}
 	t.picker.AbortDownload(block, nil)
@@ -836,11 +863,11 @@ func (t *Transfer) OnPieceHashCompleted(pieceIndex int, hash protocol.Hash) {
 	if pieceIndex < len(t.hashSet) && !t.hashSet[pieceIndex].Equal(hash) {
 		debugPeerf("transfer %s piece %d hash mismatch got=%s want=%s", t.hash.String(), pieceIndex, hash.String(), t.hashSet[pieceIndex].String())
 		if t.tryAICHRecoverPiece(pieceIndex) {
-			t.needSaveResumeData = true
+			t.markResumeDirty()
 			return
 		}
 		if t.aichPendingPiece[pieceIndex] {
-			t.needSaveResumeData = true
+			t.markResumeDirty()
 			return
 		}
 		t.picker.RestorePiece(pieceIndex)
@@ -848,7 +875,7 @@ func (t *Transfer) OnPieceHashCompleted(pieceIndex int, hash protocol.Hash) {
 		debugPeerf("transfer %s piece %d hash ok=%s", t.hash.String(), pieceIndex, hash.String())
 		t.WeHave(pieceIndex)
 	}
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 	if t.IsFinished() {
 		t.finished()
 	}
@@ -863,7 +890,7 @@ func (t *Transfer) OnBlockRestoreCompleted(block data.PieceBlock, ec BaseErrorCo
 		return
 	}
 	t.picker.WeHaveBlock(block)
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 	if t.pendingResumeIO == 0 {
 		if t.IsFinished() {
 			t.state = Finished
@@ -890,7 +917,7 @@ func (t *Transfer) finished() {
 		t.session.PublishTransferToKAD(t)
 		t.session.PublishTransferToKADV6(t)
 	}
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 }
 
 func (t *Transfer) AsyncRestoreBlock(block data.PieceBlock) {
@@ -907,7 +934,7 @@ func (t *Transfer) SetHashSet(hash protocol.Hash, hashes []protocol.Hash) {
 		return
 	}
 	t.hashSet = append(t.hashSet, hashes...)
-	t.needSaveResumeData = true
+	t.markResumeDirty()
 }
 
 func (t *Transfer) NeedResumeDataSave() bool {

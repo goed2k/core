@@ -941,11 +941,12 @@ func (c *Client) flushOnePartMet(handle TransferHandle, now time.Time, force boo
 	if !force && interval > 0 && !last.IsZero() && now.Sub(last) < interval {
 		return nil
 	}
+	gen := handle.ResumeDirtyGen()
 	if err := c.exportPartMetForTransferLocked(handle); err != nil {
 		return err
 	}
-	handle.MarkResumeDataSaved()
-	c.pendingPartMet[hash] = false
+	handle.MarkResumeSavedIfGen(gen)
+	c.pendingPartMet[hash] = handle.NeedResumeDataSave()
 	c.lastPartMetFlush[hash] = now
 	return nil
 }

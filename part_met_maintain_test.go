@@ -153,7 +153,7 @@ func TestClientFlushPartMetThrottlesAndForceWrites(t *testing.T) {
 		t.Fatalf("write block: %v", err)
 	}
 	handle.transfer.picker.WeHaveBlock(block)
-	handle.transfer.needSaveResumeData = true
+	handle.transfer.markResumeDirty()
 
 	now := time.Now()
 	if err := client.flushPartMet(now, false); err != nil {
@@ -206,7 +206,7 @@ func TestClientPartMetPendingSurvivesStateSnapshot(t *testing.T) {
 		t.Fatalf("write block: %v", err)
 	}
 	handle.transfer.picker.WeHaveBlock(block)
-	handle.transfer.needSaveResumeData = true
+	handle.transfer.markResumeDirty()
 
 	now := time.Now()
 	if err := client.flushPartMet(now, false); err != nil {
@@ -256,7 +256,7 @@ func TestClientStopFlushesDirtyPartMet(t *testing.T) {
 		t.Fatalf("write block: %v", err)
 	}
 	handle.transfer.picker.WeHaveBlock(block)
-	handle.transfer.needSaveResumeData = true
+	handle.transfer.markResumeDirty()
 
 	if err := client.Stop(); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -270,5 +270,56 @@ func TestClientStopFlushesDirtyPartMet(t *testing.T) {
 	}
 	if handle.transfer != nil && handle.transfer.handler != nil {
 		_ = handle.transfer.handler.Close()
+	}
+}
+
+func TestMarkResumeSavedIfGenKeepsLaterDirty(t *testing.T) {
+	tr := &Transfer{}
+	tr.markResumeDirty()
+	gen := tr.ResumeDirtyGen()
+	tr.markResumeDirty()
+	tr.markResumeSavedIfGen(gen)
+	if !tr.NeedResumeDataSave() {
+		t.Fatal("写出期间新增的脏进度不得被清掉")
+	}
+	tr.markResumeSavedIfGen(tr.ResumeDirtyGen())
+	if tr.NeedResumeDataSave() {
+		t.Fatal("gen 未变时应清除脏标记")
+	}
+}
+
+func TestRecoverPartMetBracketFilename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Show[1080p].bin")
+	info := PartMetInfo{
+		Hash:     protocol.EMule,
+		FileSize: PieceSize,
+		Filename: "Show[1080p].bin",
+		Resume: &protocol.TransferResumeData{
+			Hashes: []protocol.Hash{protocol.EMule},
+			Pieces: protocol.NewBitField(1),
+		},
+	}
+	info.Resume.Pieces.SetBit(0)
+	if err := ExportPartMet(path, info); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	target := path + ".part.met"
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target+".tmp.9", raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ImportPartMet(path)
+	if err != nil {
+		t.Fatalf("import bracket name: %v", err)
+	}
+	if got.Resume == nil || !got.Resume.Pieces.GetBit(0) {
+		t.Fatalf("bracket tmp should promote %+v", got.Resume)
 	}
 }

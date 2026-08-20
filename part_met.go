@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -397,11 +398,33 @@ func replaceFile(tmp, target string) error {
 // recoverPartMetSidecar 处理崩溃留下的 <file>.tmp：
 // 目标已是合法 .part.met 则丢掉过期 tmp；目标缺失或损坏且 tmp 可解析则提升 tmp。
 func listPartMetTmps(target string) []string {
-	matches, err := filepath.Glob(target + ".tmp*")
+	dir := filepath.Dir(target)
+	base := filepath.Base(target)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	return matches
+	prefix := base + ".tmp"
+	out := make([]string, 0)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name != prefix && !strings.HasPrefix(name, prefix+".") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, name))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		fi, errI := os.Stat(out[i])
+		fj, errJ := os.Stat(out[j])
+		if errI != nil || errJ != nil {
+			return out[i] > out[j]
+		}
+		return fi.ModTime().After(fj.ModTime())
+	})
+	return out
 }
 
 func recoverPartMetSidecar(target string) {

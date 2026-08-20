@@ -182,6 +182,24 @@ func (h TransferHandle) MarkResumeDataSaved() {
 	h.transfer.MarkResumeDataSaved()
 }
 
+func (h TransferHandle) ResumeDirtyGen() uint64 {
+	if h.transfer == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.transfer.ResumeDirtyGen()
+}
+
+func (h TransferHandle) MarkResumeSavedIfGen(gen uint64) {
+	if h.transfer == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.transfer.markResumeSavedIfGen(gen)
+}
+
 func (h TransferHandle) NeedResumeDataSave() bool {
 	if h.transfer == nil {
 		return false
