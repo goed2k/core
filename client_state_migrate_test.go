@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMigrateClientStateAcceptsHistoricalVersions(t *testing.T) {
@@ -197,6 +198,52 @@ func TestAutoSaveFailureIsObservable(t *testing.T) {
 	if client.LastAutoSaveError() != nil {
 		t.Fatalf("success should clear last error: %v", client.LastAutoSaveError())
 	}
+}
+
+func TestFailedAutoSaveDoesNotRetryUntilInterval(t *testing.T) {
+	client := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, client)
+	store := &countingFailStore{err: errors.New("disk full")}
+	client.SetStateStore(store)
+	client.SetAutoSaveInterval(time.Second)
+
+	now := time.Unix(1_700_000_000, 0)
+	next := client.maybeAutoSave(now, now.Add(-time.Second))
+	if store.n != 1 {
+		t.Fatalf("first due save: n=%d", store.n)
+	}
+	if !next.Equal(now) {
+		t.Fatalf("failure must still advance clock, got %v", next)
+	}
+	if client.LastAutoSaveError() == nil {
+		t.Fatal("expected LastAutoSaveError after failure")
+	}
+
+	if next2 := client.maybeAutoSave(now.Add(100*time.Millisecond), next); store.n != 1 {
+		t.Fatalf("retried before interval: n=%d", store.n)
+	} else if !next2.Equal(next) {
+		t.Fatalf("clock should stay until interval: %v", next2)
+	}
+
+	if next3 := client.maybeAutoSave(now.Add(time.Second), next); store.n != 2 {
+		t.Fatalf("should retry after interval: n=%d", store.n)
+	} else if !next3.Equal(now.Add(time.Second)) {
+		t.Fatalf("clock after retry: %v", next3)
+	}
+}
+
+type countingFailStore struct {
+	n   int
+	err error
+}
+
+func (f *countingFailStore) Load() (*ClientState, error) {
+	return nil, f.err
+}
+
+func (f *countingFailStore) Save(*ClientState) error {
+	f.n++
+	return f.err
 }
 
 type failingClientStateStore struct {

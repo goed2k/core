@@ -11,7 +11,7 @@
 - 下载中自动维护 eMule 二进制 `.part.met`：任务创建、脏进度节流和 `Stop` 时原子写出；崩溃留下的合法 `.tmp` 可在导入时恢复。
 - ED2K 链接文件名落盘前清洗：去掉路径穿越；Windows 另替换非法字符、控制字符、保留设备名和尾随点/空格。
 - `disk.PreallocateSemantics`：公开当前平台预分配真实能力（Linux fallocate / Windows NTFS / 其余仅 Truncate）。
-- Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn。
+- Settings/bootstrap 策略字段对齐：临时布局、磁盘、Web 下载、Kad 部分发布可通过 Config/env 映射；CLI 从 `DefaultConfig` 起步以免零值覆盖默认值。`ClientState` v8 持久化该子集；从未发布的状态版本 5/6 按 v7 兼容 JSON 升级。恢复限速时同步 `downloadLimiter`。自动保存失败可通过 `LastAutoSaveError` 观测并打 Warn；失败仍按间隔重试，避免每 tick 刷盘。
 
 ### 变更
 

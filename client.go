@@ -1015,11 +1015,7 @@ func (c *Client) loop() {
 			UpdateCachedTime()
 			c.session.SecondTick(CurrentTime(), elapsed.Milliseconds())
 			_ = c.flushPartMet(now, false)
-			if c.stateStore != nil && c.autoSaveTick > 0 && now.Sub(lastSave) >= c.autoSaveTick {
-				if err := c.saveStateIfConfigured(); err == nil {
-					lastSave = now
-				}
-			}
+			lastSave = c.maybeAutoSave(now, lastSave)
 		case <-c.stopCh:
 			return
 		}
@@ -1047,6 +1043,18 @@ func (c *Client) saveStateIfConfigured() error {
 	err := c.SaveState("")
 	c.noteAutoSaveResult(err)
 	return err
+}
+
+// maybeAutoSave 到期则尝试保存。无论成败都推进时钟，避免磁盘满时每 tick 狂写/刷 Warn。
+func (c *Client) maybeAutoSave(now, lastSave time.Time) time.Time {
+	if c == nil || c.stateStore == nil || c.autoSaveTick <= 0 {
+		return lastSave
+	}
+	if now.Sub(lastSave) < c.autoSaveTick {
+		return lastSave
+	}
+	_ = c.saveStateIfConfigured()
+	return now
 }
 
 // LastAutoSaveError 返回最近一次自动保存的错误；成功后为 nil。
