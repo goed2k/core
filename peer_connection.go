@@ -187,6 +187,7 @@ type PeerConnection struct {
 	uploadResource     UploadableResource
 	sourceExchangeSent bool
 	pendingAICHPiece   int
+	aichRootRequested  bool
 	identityVerified   bool
 	remotePubKey       []byte
 	remoteChallenge    uint32
@@ -608,6 +609,40 @@ func (p *PeerConnection) SendAICHFileHashAnswer(res UploadableResource) {
 	if raw, err := p.combiner.Pack("client.AICHFileHashAnswer", &packet); err == nil {
 		p.QueuePacket(raw)
 	}
+}
+
+func (p *PeerConnection) SendAICHFileHashRequest(hash protocol.Hash) {
+	if p == nil || hash.IsZero() {
+		return
+	}
+	debugPeerf("peer %s -> AICHFileHashRequest", p.endpoint.String())
+	packet := clientproto.AICHFileHashRequest{Hash: hash}
+	if raw, err := p.combiner.Pack("client.AICHFileHashRequest", &packet); err == nil {
+		p.QueuePacket(raw)
+	}
+}
+
+// maybeRequestAICHRoot 在对端宣告 AICH 且本任务尚无根哈希时发送 OP_AICHFILEHASHREQ。
+// 每个连接最多请求一次，避免对不回答的来源重复刷包。
+func (p *PeerConnection) maybeRequestAICHRoot() {
+	if p == nil || p.transfer == nil || p.IsDisconnecting() {
+		return
+	}
+	if p.aichRootRequested {
+		return
+	}
+	if p.remotePeerInfo.Misc1.AICHVersion == 0 {
+		return
+	}
+	if _, ok := p.transfer.AICHRootHash(); ok {
+		return
+	}
+	hash := p.transfer.GetHash()
+	if hash.IsZero() {
+		return
+	}
+	p.aichRootRequested = true
+	p.SendAICHFileHashRequest(hash)
 }
 
 func (p *PeerConnection) SendAICHRequestForPiece(t *Transfer, pieceIndex int) {
@@ -1197,14 +1232,25 @@ func (p *PeerConnection) HandleAICHAnswer(value *clientproto.AICHAnswer) {
 	}
 	p.transfer.StoreAICHPieceBlocks(pieceIndex, value.Hashes)
 	p.transfer.tryAICHRecoverPiece(pieceIndex)
+	p.transfer.retryPendingAICHRecoveries()
 }
 
 func (p *PeerConnection) HandleAICHFileHashAnswer(value *clientproto.AICHFileHashAnswer) {
 	if value == nil || p.transfer == nil || !value.Hash.Equal(p.transfer.GetHash()) {
 		return
 	}
-	if _, ok := p.transfer.AICHRootHash(); !ok {
-		p.transfer.SetAICHRootHash(value.RootHash)
+	if value.RootHash.IsZero() {
+		return
+	}
+	if existing, ok := p.transfer.AICHRootHash(); ok {
+		if !existing.Equal(value.RootHash) {
+			debugPeerf("peer %s AICH root conflict have=%s got=%s", p.endpoint.String(), existing.String(), value.RootHash.String())
+		}
+		return
+	}
+	p.transfer.SetAICHRootHash(value.RootHash)
+	if _, ok := p.transfer.AICHRootHash(); ok {
+		p.transfer.retryPendingAICHRecoveries()
 	}
 }
 
@@ -1225,6 +1271,9 @@ func (p *PeerConnection) HandleFileStatusAnswer(value *clientproto.FileStatusAns
 		p.remotePieces.GetBit(0),
 		p.remotePieces.GetBit(1),
 		p.remotePieces.GetBit(2))
+	if p.transfer != nil && value != nil && p.transfer.GetHash().Equal(value.Hash) {
+		p.maybeRequestAICHRoot()
+	}
 	if p.transfer != nil && p.transfer.Size() > 9728000 {
 		p.SendHashSetRequest(p.transfer.GetHash())
 	} else if p.transfer != nil {
@@ -1289,6 +1338,7 @@ func (p *PeerConnection) ProcessIncoming() error {
 					p.transfer.GetHash().Equal(protocol.HashFromHashSet(value.Parts)) &&
 					p.transfer.picker.GetPieceCount() == len(value.Parts) {
 					p.transfer.SetHashSet(value.Hash, value.Parts)
+					p.maybeRequestAICHRoot()
 					p.maybeSendSourceExchange()
 					p.SendStartUpload(p.transfer.GetHash())
 				} else {

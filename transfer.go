@@ -952,6 +952,9 @@ func (t *Transfer) SetAICHRootHash(root protocol.AICHHash) {
 	if t == nil || root.IsZero() {
 		return
 	}
+	if !t.aichRoot.IsZero() {
+		return
+	}
 	t.aichRoot = root
 }
 
@@ -1007,13 +1010,20 @@ func (t *Transfer) AICHPieceBlocks(pieceIndex int) []protocol.AICHHash {
 }
 
 func (t *Transfer) tryAICHRecoverPiece(pieceIndex int) bool {
+	if t == nil || t.pieceSize(pieceIndex) <= int64(AICHBlockSize) {
+		return false
+	}
 	root, ok := t.AICHRootHash()
-	if !ok || t.pm == nil || t.pieceSize(pieceIndex) <= int64(AICHBlockSize) {
+	if !ok {
+		t.requestAICHRootFromPeers()
 		return false
 	}
 	blockHashes := t.AICHPieceBlocks(pieceIndex)
 	if len(blockHashes) == 0 {
 		t.requestAICHRecovery(pieceIndex)
+		return false
+	}
+	if t.pm == nil {
 		return false
 	}
 	delete(t.aichPendingPiece, pieceIndex)
@@ -1059,6 +1069,7 @@ func (t *Transfer) requestAICHRecovery(pieceIndex int) {
 		return
 	}
 	if _, ok := t.AICHRootHash(); !ok {
+		t.requestAICHRootFromPeers()
 		return
 	}
 	t.aichPendingPiece[pieceIndex] = true
@@ -1066,7 +1077,37 @@ func (t *Transfer) requestAICHRecovery(pieceIndex int) {
 		if c == nil || c.IsDisconnecting() || c.remotePeerInfo.Misc1.AICHVersion == 0 {
 			continue
 		}
+		if c.pendingAICHPiece >= 0 {
+			continue
+		}
 		c.SendAICHRequestForPiece(t, pieceIndex)
 		return
+	}
+}
+
+func (t *Transfer) requestAICHRootFromPeers() {
+	if t == nil {
+		return
+	}
+	if _, ok := t.AICHRootHash(); ok {
+		return
+	}
+	for _, c := range t.connections {
+		if c == nil {
+			continue
+		}
+		c.maybeRequestAICHRoot()
+	}
+}
+
+func (t *Transfer) retryPendingAICHRecoveries() {
+	if t == nil {
+		return
+	}
+	if _, ok := t.AICHRootHash(); !ok {
+		return
+	}
+	for pieceIndex := range t.aichPendingPiece {
+		t.requestAICHRecovery(pieceIndex)
 	}
 }
