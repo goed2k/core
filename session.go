@@ -55,18 +55,20 @@ type Session struct {
 	lastKadPeriodicPublishAt   int64
 	lastKadv6PublishTCPAddr    *net.TCPAddr
 	lastKadv6PeriodicPublishAt int64
-	sharedStore                *SharedStore
-	sharedDirs                 []string
-	serverMetMeta              map[string]serverMetEntryMeta
-	globUDPChallenge           map[uint32]globUDPChallengeEntry
-	udpServerStats             map[string]serverUDPStats
-	serverStatUDPConn          *net.UDPConn
-	serverStatUDPStop          chan struct{}
-	listenPortWasDynamic       bool
-	identity                   *IdentityState
-	ipFilter                   *IPFilter
-	bannedPeers                map[string]protocol.Endpoint
-	udpReachable               bool
+	// detectOutboundIPv6 可注入本机 IPv6 出站地址；nil 时走真实探测。仅测试使用。
+	detectOutboundIPv6   func() net.IP
+	sharedStore          *SharedStore
+	sharedDirs           []string
+	serverMetMeta        map[string]serverMetEntryMeta
+	globUDPChallenge     map[uint32]globUDPChallengeEntry
+	udpServerStats       map[string]serverUDPStats
+	serverStatUDPConn    *net.UDPConn
+	serverStatUDPStop    chan struct{}
+	listenPortWasDynamic bool
+	identity             *IdentityState
+	ipFilter             *IPFilter
+	bannedPeers          map[string]protocol.Endpoint
+	udpReachable         bool
 }
 
 type serverMetEntryMeta struct {

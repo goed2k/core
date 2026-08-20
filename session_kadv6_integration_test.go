@@ -7,19 +7,6 @@ import (
 	"testing"
 )
 
-func skipUnlessIPv6Network(t *testing.T) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("跳过：短测试模式不运行 IPv6 联调")
-	}
-	if os.Getenv("GOED2K_RUN_KADV6_INTEGRATION") != "1" {
-		t.Skip("跳过：KADV6 联调测试需设置 GOED2K_RUN_KADV6_INTEGRATION=1")
-	}
-	if localOutboundIPv6() == nil {
-		t.Skip("跳过：本机无可用 IPv6 出站地址")
-	}
-}
-
 // TestKADV6PublishSearchMergePipeline 验证发布 → 本地索引 → 并入 Policy 的闭环（不依赖外网）。
 func TestKADV6PublishSearchMergePipeline(t *testing.T) {
 	session, transfer := newTestTransfer(t)
@@ -53,12 +40,60 @@ func TestKADV6PublishSearchMergePipeline(t *testing.T) {
 	}
 }
 
-// TestKADV6PublishSearchPipelineLive 在具备 IPv6 的环境验证发布端点与本机索引。
+// TestKADV6PublishSearchPipelineUsesInjectedEndpoint 用注入的文档地址走 PublishTransferToKADV6，不探测本机/公网 IPv6。
+func TestKADV6PublishSearchPipelineUsesInjectedEndpoint(t *testing.T) {
+	session, transfer := newTestTransfer(t)
+	session.settings.EnableDHTv6 = true
+	session.settings.ListenPort = 4661
+	session.detectOutboundIPv6 = func() net.IP { return net.ParseIP("2001:db8::42") }
+	transfer.state = Finished
+
+	tracker := NewKADV6Tracker(0, 0)
+	seed := mustUDPAddrV6(t, "[2001:db8::1]:4672")
+	tracker.AddNode(seed)
+	session.dhtv6Tracker = tracker
+
+	tcpAddr := session.kadv6PublishEndpoint()
+	if tcpAddr == nil || tcpAddr.String() != "[2001:db8::42]:4661" {
+		t.Fatalf("expected injected publish endpoint, got %v", tcpAddr)
+	}
+
+	session.PublishTransferToKADV6(transfer)
+
+	entries := tracker.searchEntriesLocked(transfer.hash)
+	if len(entries) == 0 {
+		t.Fatal("expected published source in local index after PublishTransferToKADV6")
+	}
+	got, ok := entries[0].SourceAddr()
+	if !ok || got.String() != "[2001:db8::42]:4661" {
+		t.Fatalf("unexpected published source %v ok=%v", got, ok)
+	}
+}
+
+func TestKadv6UnitTestsDoNotDiscoverPublicIPv6(t *testing.T) {
+	if os.Getenv("GOED2K_RUN_KADV6_INTEGRATION") == "1" {
+		t.Skip("live 模式使用真实探测器")
+	}
+	session := NewSession(NewSettings())
+	session.settings.ListenPort = 4661
+	session.settings.EnableDHTv6 = true
+	if session.kadv6PublishEndpoint() != nil {
+		t.Fatal("unit tests must not discover a public IPv6 via probe")
+	}
+	session.dhtv6Tracker = NewKADV6Tracker(0, 0)
+	session.SecondTick(CurrentTime(), 100)
+	if session.lastKadv6PublishTCPAddr != nil {
+		t.Fatal("SecondTick must not publish via public IPv6 probe in unit tests")
+	}
+}
+
+// TestKADV6PublishSearchPipelineLive 可选：真实探测本机出站 IPv6 后写入本地索引。
 func TestKADV6PublishSearchPipelineLive(t *testing.T) {
-	skipUnlessIPv6Network(t)
+	skipUnlessKADV6Integration(t)
 
 	session, transfer := newTestTransfer(t)
 	session.settings.EnableDHTv6 = true
+	session.settings.ListenPort = 4661
 	transfer.state = Finished
 
 	tracker := NewKADV6Tracker(0, 0)
@@ -112,5 +147,3 @@ func TestClientLoadStateRestoresIdentityKeyFromStateFile(t *testing.T) {
 		t.Fatalf("expected key path %q, got %q", keyPath, id.KeyPath())
 	}
 }
-
-// skipUnlessIPv6Network 跳过需要本机 IPv6 出站能力的联调测试。
