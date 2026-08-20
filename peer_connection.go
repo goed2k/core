@@ -1232,6 +1232,7 @@ func (p *PeerConnection) HandleAICHAnswer(value *clientproto.AICHAnswer) {
 	}
 	p.transfer.StoreAICHPieceBlocks(pieceIndex, value.Hashes)
 	p.transfer.tryAICHRecoverPiece(pieceIndex)
+	p.transfer.retryPendingAICHRecoveries()
 }
 
 func (p *PeerConnection) HandleAICHFileHashAnswer(value *clientproto.AICHFileHashAnswer) {
