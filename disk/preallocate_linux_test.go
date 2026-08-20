@@ -3,7 +3,6 @@
 package disk
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
