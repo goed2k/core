@@ -26,7 +26,7 @@
 ### 修复
 
 - 二进制 `.part.met` 导入会把未完成分片中已下完的整块写入 `DownloadedBlocks`，不再只保留完全没有 gap 的 piece。半块仍丢弃。
-- `UseEmuleTempLayout` 完成搬运改为 `OnReleaseFile` 之后执行，避免未关句柄时改名、换新 handler 却让 PieceManager 仍指向旧路径。目标同大小不再当崩溃重试覆盖/删源。Linux 上 `errno 17`（EEXIST）不再误判为跨卷。搬运后重新标脏，避免 state 仍记录已消失的 `NNN.part`。释放后 seal handler，禁止 `File()` 在旧路径 `O_CREATE` 重建空文件挡住 Rename。恢复已完成任务时在 promote 后再写入 SharedStore，避免崩溃发生在释放前导致永久不共享。
+- `UseEmuleTempLayout` 完成搬运改为 `OnReleaseFile` 之后执行，避免未关句柄时改名、换新 handler 却让 PieceManager 仍指向旧路径。目标同大小不再当崩溃重试覆盖/删源。Linux 上 `errno 17`（EEXIST）不再误判为跨卷。搬运后重新标脏，避免 state 仍记录已消失的 `NNN.part`。释放后 seal handler，禁止 `File()` 在旧路径 `O_CREATE` 重建空文件挡住 Rename。恢复已完成任务时在 promote 后再写入 SharedStore，避免崩溃发生在释放前导致永久不共享。`CloseAndSeal` 同锁关闭并禁止重建。已有共享项仅当路径仍是 `NNN.part` 才改写，避免冲突改名后把别人的最终文件改指向副本。
 
 ## [0.1.3] - 2026-08-02
 

@@ -132,10 +132,7 @@ func NewTransfer(s *Session, atp AddTransferParams) (*Transfer, error) {
 	}
 	if t.IsFinished() {
 		if s != nil && s.settings.UseEmuleTempLayout && isEmuleTempPartPath(t.GetFilePath()) {
-			if t.handler != nil {
-				_ = t.handler.Close()
-			}
-			t.sealHandler()
+			t.closeAndSealHandler()
 			t.promoteEmuleTempPartIfNeeded()
 		}
 		if s != nil {
@@ -984,18 +981,22 @@ func (t *Transfer) promoteEmuleTempPartIfNeeded() {
 		t.unsealHandler()
 	}
 	if t.session.sharedStore != nil {
-		t.session.sharedStore.UpdatePath(t.hash, dest, t.FileName())
+		if sf := t.session.sharedStore.Get(t.hash); sf != nil && (sf.Path == src || isEmuleTempPartPath(sf.Path)) {
+			t.session.sharedStore.UpdatePath(t.hash, dest, filepath.Base(dest))
+		}
 	}
 	t.markResumeDirty()
 }
 
-func (t *Transfer) sealHandler() {
+func (t *Transfer) closeAndSealHandler() {
 	if t == nil || t.handler == nil {
 		return
 	}
-	if sealer, ok := t.handler.(interface{ Seal() }); ok {
-		sealer.Seal()
+	if sealer, ok := t.handler.(interface{ CloseAndSeal() error }); ok {
+		_ = sealer.CloseAndSeal()
+		return
 	}
+	_ = t.handler.Close()
 }
 
 func (t *Transfer) unsealHandler() {

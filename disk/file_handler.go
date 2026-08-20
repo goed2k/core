@@ -55,8 +55,20 @@ func (h *DesktopFileHandler) Path() string {
 }
 
 func (h *DesktopFileHandler) Close() error {
+	return h.closeLocked(false)
+}
+
+// CloseAndSeal 在同一把锁里关闭并禁止 File() 按旧路径重建。
+func (h *DesktopFileHandler) CloseAndSeal() error {
+	return h.closeLocked(true)
+}
+
+func (h *DesktopFileHandler) closeLocked(seal bool) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if seal {
+		h.sealed = true
+	}
 	if h.file == nil {
 		return nil
 	}

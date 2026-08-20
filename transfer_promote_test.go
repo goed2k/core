@@ -385,3 +385,55 @@ func TestFinishedUsesIncomingDirWhenSet(t *testing.T) {
 		t.Fatalf("incoming dest %s", handle.GetFilePath())
 	}
 }
+
+func TestPromoteDoesNotRetargetExistingShare(t *testing.T) {
+	tempDir := t.TempDir()
+	incoming := t.TempDir()
+	src := filepath.Join(tempDir, "002.part")
+	payload := []byte("payload-ok")
+	if err := os.WriteFile(src, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exist := filepath.Join(incoming, "clip.bin")
+	if err := os.WriteFile(exist, []byte("other"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := NewSettings()
+	settings.UseEmuleTempLayout = true
+	settings.IncomingDir = incoming
+	settings.ListenPort = 0
+	session := NewSession(settings)
+	if !session.sharedStore.Add(&SharedFile{
+		Hash:        protocol.EMule,
+		FileSize:    5,
+		Path:        exist,
+		Name:        "clip.bin",
+		PieceHashes: []protocol.Hash{protocol.EMule},
+		Origin:      SharedOriginImported,
+		Completed:   true,
+	}) {
+		t.Fatal("add existing share")
+	}
+	handle, err := session.AddTransferParams(AddTransferParams{
+		Hash:       protocol.EMule,
+		CreateTime: CurrentTimeMillis(),
+		Size:       int64(len(payload)),
+		FilePath:   src,
+		FinalName:  "clip.bin",
+		Handler:    disk.NewDesktopFileHandler(src),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerTransferFileCleanup(t, handle)
+	handle.transfer.picker.WeHave(0)
+	handle.transfer.finished()
+	waitDiskIdle(t, session)
+	if filepath.Base(handle.GetFilePath()) != "clip (1).bin" {
+		t.Fatalf("collision dest %s", handle.GetFilePath())
+	}
+	sf := session.sharedStore.Get(protocol.EMule)
+	if sf == nil || sf.Path != exist || sf.Name != "clip.bin" {
+		t.Fatalf("existing share retargeted %+v", sf)
+	}
+}

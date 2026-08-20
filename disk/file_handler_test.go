@@ -99,10 +99,9 @@ func TestDesktopFileHandlerSealBlocksRecreate(t *testing.T) {
 	if handler.File() == nil {
 		t.Fatal("expected open file")
 	}
-	if err := handler.Close(); err != nil {
+	if err := handler.CloseAndSeal(); err != nil {
 		t.Fatal(err)
 	}
-	handler.Seal()
 	if handler.File() != nil {
 		t.Fatal("sealed handler must not recreate file")
 	}
