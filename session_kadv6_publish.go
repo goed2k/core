@@ -9,6 +9,13 @@ import (
 	kadv6proto "github.com/goed2k/core/protocol/kadv6"
 )
 
+func (s *Session) outboundIPv6() net.IP {
+	if s != nil && s.detectOutboundIPv6 != nil {
+		return s.detectOutboundIPv6()
+	}
+	return localOutboundIPv6()
+}
+
 func localOutboundIPv6() net.IP {
 	c, err := net.DialTimeout("udp6", "[2001:4860:4860::8888]:53", 400*time.Millisecond)
 	if err != nil {
@@ -44,7 +51,7 @@ func (s *Session) kadv6PublishEndpoint() *net.TCPAddr {
 		}
 	}
 	if ip == nil {
-		ip = localOutboundIPv6()
+		ip = s.outboundIPv6()
 	}
 	if ip == nil || ip.To4() != nil {
 		return nil

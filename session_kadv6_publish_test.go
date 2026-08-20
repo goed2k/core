@@ -60,6 +60,24 @@ func TestPublishSingleTransferKADV6IndexesKeyword(t *testing.T) {
 	}
 }
 
+func TestKadv6PublishEndpointListenPortZeroSkipsEvenWithDetector(t *testing.T) {
+	session := NewSession(NewSettings())
+	session.settings.ListenPort = 0
+	session.detectOutboundIPv6 = func() net.IP { return net.ParseIP("2001:db8::42") }
+	if session.kadv6PublishEndpoint() != nil {
+		t.Fatal("ListenPort=0 must skip publish even when detector returns an address")
+	}
+}
+
+func TestKadv6PublishEndpointNilDetectorSkips(t *testing.T) {
+	session := NewSession(NewSettings())
+	session.settings.ListenPort = 4661
+	session.detectOutboundIPv6 = func() net.IP { return nil }
+	if session.kadv6PublishEndpoint() != nil {
+		t.Fatal("expected nil endpoint when injected detector returns nil")
+	}
+}
+
 func TestPublishTransferToKADV6SkipsWithoutIPv6Endpoint(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	session.settings.EnableDHTv6 = true

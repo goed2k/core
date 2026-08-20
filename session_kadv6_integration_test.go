@@ -2,23 +2,9 @@ package goed2k
 
 import (
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 )
-
-func skipUnlessIPv6Network(t *testing.T) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("跳过：短测试模式不运行 IPv6 联调")
-	}
-	if os.Getenv("GOED2K_RUN_KADV6_INTEGRATION") != "1" {
-		t.Skip("跳过：KADV6 联调测试需设置 GOED2K_RUN_KADV6_INTEGRATION=1")
-	}
-	if localOutboundIPv6() == nil {
-		t.Skip("跳过：本机无可用 IPv6 出站地址")
-	}
-}
 
 // TestKADV6PublishSearchMergePipeline 验证发布 → 本地索引 → 并入 Policy 的闭环（不依赖外网）。
 func TestKADV6PublishSearchMergePipeline(t *testing.T) {
@@ -53,12 +39,12 @@ func TestKADV6PublishSearchMergePipeline(t *testing.T) {
 	}
 }
 
-// TestKADV6PublishSearchPipelineLive 在具备 IPv6 的环境验证发布端点与本机索引。
-func TestKADV6PublishSearchPipelineLive(t *testing.T) {
-	skipUnlessIPv6Network(t)
-
+// TestKADV6PublishSearchPipelineUsesInjectedEndpoint 用注入的文档地址走 PublishTransferToKADV6，不探测本机/公网 IPv6。
+func TestKADV6PublishSearchPipelineUsesInjectedEndpoint(t *testing.T) {
 	session, transfer := newTestTransfer(t)
 	session.settings.EnableDHTv6 = true
+	session.settings.ListenPort = 4661
+	session.detectOutboundIPv6 = func() net.IP { return net.ParseIP("2001:db8::42") }
 	transfer.state = Finished
 
 	tracker := NewKADV6Tracker(0, 0)
@@ -67,8 +53,8 @@ func TestKADV6PublishSearchPipelineLive(t *testing.T) {
 	session.dhtv6Tracker = tracker
 
 	tcpAddr := session.kadv6PublishEndpoint()
-	if tcpAddr == nil {
-		t.Fatal("expected IPv6 publish endpoint on IPv6-capable host")
+	if tcpAddr == nil || tcpAddr.String() != "[2001:db8::42]:4661" {
+		t.Fatalf("expected injected publish endpoint, got %v", tcpAddr)
 	}
 
 	session.PublishTransferToKADV6(transfer)
@@ -78,8 +64,8 @@ func TestKADV6PublishSearchPipelineLive(t *testing.T) {
 		t.Fatal("expected published source in local index after PublishTransferToKADV6")
 	}
 	got, ok := entries[0].SourceAddr()
-	if !ok || got.Port != tcpAddr.Port {
-		t.Fatalf("unexpected published source %v ok=%v want port %d", got, ok, tcpAddr.Port)
+	if !ok || got.String() != "[2001:db8::42]:4661" {
+		t.Fatalf("unexpected published source %v ok=%v", got, ok)
 	}
 }
 
@@ -112,5 +98,3 @@ func TestClientLoadStateRestoresIdentityKeyFromStateFile(t *testing.T) {
 		t.Fatalf("expected key path %q, got %q", keyPath, id.KeyPath())
 	}
 }
-
-// skipUnlessIPv6Network 跳过需要本机 IPv6 出站能力的联调测试。

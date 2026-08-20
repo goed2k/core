@@ -60,8 +60,7 @@ go test -race -count=1 ./...
 # 运行外网联调测试（需可访问 ED2K 网络）
 GOED2K_RUN_LIVE_TESTS=1 go test -run LiveDownload -count=1 .
 
-# 运行 KADV6 IPv6 联调（需本机 IPv6 出站）
-GOED2K_RUN_KADV6_INTEGRATION=1 go test -run KADV6PublishSearchPipelineLive -count=1 .
+# KADV6 发布/合并单测已包含在默认 go test 中，使用注入的文档地址，不探测本机公网 IPv6。
 ```
 
 推送至 `main` 或提交 Pull Request 时，GitHub Actions 会自动运行 `go vet`、全量单元测试（含覆盖率）与构建检查。Integration 工作流每日 UTC 03:00 定时运行单元测试。
