@@ -19,11 +19,11 @@ const InvalidETA int64 = -1
 // 秒级重试易被服务器忽略或触发限流。
 const (
 	fileReaskServerTCPMS = 1_300_000 // FILEREASKTIME（约 21.7 分钟）
-	serverReaskTCPMS     = 800_000  // SERVERREASKTIME（约 13.3 分钟），无活跃连接与候选时略缩短
+	serverReaskTCPMS     = 800_000   // SERVERREASKTIME（约 13.3 分钟），无活跃连接与候选时略缩短
 )
 
 // DHT（Kad）要源：eMule 中对同一文件重复发起 Kad 源搜索的间隔通常为 KADEMLIAREASKTIME
-//（约 1 小时量级，见 eMule Kademlia 侧实现）；本实现为更快发现源采用更短默认间隔。
+// （约 1 小时量级，见 eMule Kademlia 侧实现）；本实现为更快发现源采用更短默认间隔。
 // 下列毫秒值与 nextDHTSourcesInterval 各分支一致。
 const (
 	dhtSourcesReaskStarvedMS  = 30_000  // 成功发出且无任何连接/候选
