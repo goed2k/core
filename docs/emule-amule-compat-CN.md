@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `5468847`（2026-08-20 审查，含 Settings/bootstrap/state v8）。
+- **基线**：`main` 分支提交 `5f37efc`（2026-08-20，含 #32 `NNN.part` 释放后搬运）。本路线图可做项已收口。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -34,10 +34,10 @@
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
 | **下载侧 TCP QueueRanking/重询语义已覆盖；上传侧跨连接排队身份已覆盖** | 下载侧会把远端 rank、排队状态和下一次重询期限保存在逻辑 `Peer` 中；收到 `QueueRanking` 后允许关闭 TCP，但 `Policy` 不增加 `FailCount`，并按 eMule `FILEREASKTIME`（29 分钟）阻止提前重连；同一来源重询会更新 rank，`AcceptUpload` 或实际下载开始会清理状态。上传侧等待项改为不绑定活跃 `*PeerConnection` 的 `uploadWaiter`：有 UserHash 时 TCP 断开只分离连接，保留 waitStart/rank/lastAsked/文件 hash/IP/UDP；同一 UserHash 重连附着原记录；UDP ReAsk 按 IP+UDP+文件 hash 查找，断开后仍可 ACK。`CancelTransfer` 删除身份；超过 eMule `MAX_PURGEQUEUETIME`（70 分钟）未重询则清除。无 UserHash 的连接仍绑定套接字，断开即删。上传中的槽位仍要求存活 TCP。旧连接延迟断开只匹配自身指针，不会拆掉已重连的新连接。 | 下载侧正常排队不再被误记为坏来源，也不会因 TCP 关闭立即重连；本客户端作为上传方时，远端按期重连或 UDP ReAsk 可延续等待时间，而不会因 TCP 关闭被当成新请求排到队尾。**TCP 断开本身不是缺陷。** | 高 | 已有可控时钟状态机覆盖下载侧重询，以及上传侧断开保留、重连保序、旧连接延迟断开不拆新身份、取消重建、超时清除、队列满仍接受旧身份、无 UserHash 断开即删、断开后 UDP ACK/FileNotFound/QueueFull。仍需 eMule/aMule 长队列抓包联调。 |
-| **客户端 UDP ReAsk 基础格式已覆盖；UDPVer 2+ 扩展仍未完成** | `client_udp.go` 使用 `OP_EMULEPROT`（0xC5）编解码标准 `OP_REASKFILEPING`（hash 16）、`OP_REASKACK`（rank 2）、`OP_FILENOTFOUND`、`OP_QUEUEFULL`。Hello 宣告 `UDPVer=1` 与 `CT_EMULE_UDPPORTS`，不宣告 part status / complete source count。下载侧到期排队来源在已知 UDP 端口时优先 UDP ReAsk，TCP 回退；ACK 更新 rank 并推迟重询，QueueFull/FileNotFound 不增加 `FailCount`。上传侧按 IP+UDP+文件 hash 匹配 `uploadWaiter`，TCP 断开后仍可 ACK 并刷新 lastAsked。旧 6 字节 0xE3 探测已拒绝。 | 与 eMule 基础 ReAsk 互问互答已具备线格式与状态接入；断开后的排队身份可由 UDP 续期。不处理 `OP_PACKEDPROT` 压缩客户端 UDP。 | 高 | 已有 golden bytes、短包/旧探测拒绝、下载侧 ACK/QueueFull/FileNotFound 与上传侧匹配/未知文件/断开后 ACK 测试。UDPVer>3 的 part status、complete source count 仍是后续独立 PR。 |
+| **客户端 UDP ReAsk 基础格式已覆盖；UDPVer 2+ 扩展仍未完成** | `client_udp.go` 使用 `OP_EMULEPROT`（0xC5）编解码标准 `OP_REASKFILEPING`（hash 16）、`OP_REASKACK`（rank 2）、`OP_FILENOTFOUND`、`OP_QUEUEFULL`。Hello 宣告 `UDPVer=1` 与 `CT_EMULE_UDPPORTS`，不宣告 part status / complete source count。下载侧到期排队来源在已知 UDP 端口时优先 UDP ReAsk，TCP 回退；ACK 更新 rank 并推迟重询，QueueFull/FileNotFound 不增加 `FailCount`。上传侧按 IP+UDP+文件 hash 匹配 `uploadWaiter`，TCP 断开后仍可 ACK 并刷新 lastAsked。旧 6 字节 0xE3 探测已拒绝。 | 与 eMule 基础 ReAsk 互问互答已具备线格式与状态接入；断开后的排队身份可由 UDP 续期。不处理 `OP_PACKEDPROT` 压缩客户端 UDP。 | 高 | 已有 golden bytes、短包/旧探测拒绝、下载侧 ACK/QueueFull/FileNotFound 与上传侧匹配/未知文件/断开后 ACK 测试。UDPVer 2+ 本路线图不做，需独立立项。 |
 | **普通块边界已统一为 180 KiB（完整分片末块 140 KiB）** | `BlockSize` / `prBlockSize` / `AICHBlockSize` 均为 `180*1024`；`BlocksPerPiece=53`。磁盘用 `FileOffset()`（`piece*PieceSize+block*BlockSize`）。正好整片的文件最后一片使用 53 块，不再误标成 1 块。v8 及更早 state 的 `DownloadedBlocks` 按 190 KiB 重映射；未完整覆盖的新块丢弃。完成 piece 位图不改。未改 MultiPacket 出站。 | 与 eMule/aMule 请求切分、AICH 坏块和 `.part.met` gap 对齐。旧 state 中未完整覆盖新块的进度会丢弃并重下。 | 高 | 已有 53 块/末块 140 KiB、FileOffset≠BlocksOffset*BlockSize、整片文件 last-piece 块数、AICH 一对一、190→180 重映射、v8 升级、HTTP 末块 Range、part.met 末块不跨片测试。 |
-| **Kad LowID 消费/发布已覆盖服务器回调路径；Buddy 隧道与 KADV6 LowID 标签仍待后续** | `protocol/kad/types.go:SourceInfo` 按 eMule `TAG_SOURCETYPE` 区分 HighID（1/4）与 LowID（2/3 或仅 client ID）。`session.mergeKadSearchSources` 对 HighID `AddPeer` 直连，对 LowID 写入 `ServerClientID` 并复用 `Policy.ConnectOnePeer` → `RequestServerCallback`。`PublishSource` 按 `session.clientID`/`IsLowID` 发布 SourceType=1 或 2（LowID 带 `TagClientLowID`，不再固定宣称 HighID）。KADV6 仍拒绝 SourceType=2/3 直连，且本机 LowID 时跳过 IPv6 源发布，不实现 client ID 标签。未实现 FindBuddy TCP 隧道、Kad2、KAD↔KADV6 桥接。 | Kad4 LowID 来源不再被当成假 IP 拨号；本机 LowID 发布可被其他客户端识别为需回调。没有 Buddy 时，双方都是 LowID 或未连服务器仍无法互连。KADV6 LowID 只是不再谎报 HighID。 | 中 | 已有假 tracker/entry 测试：HighID 直连、LowID/type2/type3/仅 client ID 进回调、不可用 type2 不入表、HighID/LowID 发布标签与共存索引。仍需真实 LowID 节点与 eMule/aMule 联调；Buddy/Kad2/KADV6 LowID 标签为后续独立 PR。 |
-| **Hello/MiscOptions 能力声明与处理能力不一致** | `peer_connection.go:PrepareHelloAnswer` 现已宣告大文件、SX2 与 `UDPVer=1`（标准 ReAsk 基础格式），并写入 `CT_EMULE_UDPPORTS`。`SupportsPreview`、`MultiPacket` 与 Captcha 仍未声明。`SupportLargeFiles()` 已按位读取。 | 对端可据此发送基础 UDP ReAsk；高 UDPVer 扩展、Preview 与 MultiPacket 仍不应出现。 | 中 | 能力位 golden test 已覆盖已实现位；Preview/MultiPacket 仅在各自闭环后声明。 |
+| **Kad LowID 消费/发布已覆盖服务器回调路径；Buddy 隧道与 KADV6 LowID 标签仍待后续** | `protocol/kad/types.go:SourceInfo` 按 eMule `TAG_SOURCETYPE` 区分 HighID（1/4）与 LowID（2/3 或仅 client ID）。`session.mergeKadSearchSources` 对 HighID `AddPeer` 直连，对 LowID 写入 `ServerClientID` 并复用 `Policy.ConnectOnePeer` → `RequestServerCallback`。`PublishSource` 按 `session.clientID`/`IsLowID` 发布 SourceType=1 或 2（LowID 带 `TagClientLowID`，不再固定宣称 HighID）。KADV6 仍拒绝 SourceType=2/3 直连，且本机 LowID 时跳过 IPv6 源发布，不实现 client ID 标签。未实现 FindBuddy TCP 隧道、Kad2、KAD↔KADV6 桥接。 | Kad4 LowID 来源不再被当成假 IP 拨号；本机 LowID 发布可被其他客户端识别为需回调。没有 Buddy 时，双方都是 LowID 或未连服务器仍无法互连。KADV6 LowID 只是不再谎报 HighID。 | 中 | 已有假 tracker/entry 测试：HighID 直连、LowID/type2/type3/仅 client ID 进回调、不可用 type2 不入表、HighID/LowID 发布标签与共存索引。仍需真实 LowID 节点与 eMule/aMule 联调。Buddy/Kad2 刻意不做；KADV6 LowID 标签需官方证据，本路线图不做。 |
+| **Hello/MiscOptions 能力声明与处理能力不一致** | `peer_connection.go:PrepareHelloAnswer` 现已宣告大文件、SX2 与 `UDPVer=1`（标准 ReAsk 基础格式），并写入 `CT_EMULE_UDPPORTS`。`SupportsPreview`、`MultiPacket` 与 Captcha 仍未声明。`SupportLargeFiles()` 已按位读取。 | 对端可据此发送基础 UDP ReAsk；高 UDPVer 扩展与 Preview 仍不应出现。MultiPacket 按第 12 项永不宣告。 | 中 | 能力位 golden test 已覆盖已实现位。Captcha UI / MultiPacket 出站刻意不做，故不宣告。 |
 
 ## 4. P1：可靠性、迁移与平台一致性
 
@@ -60,8 +60,8 @@
 | **Kad2 与 Kad4↔KADV6 桥接缺失** | `protocol/kad/` 与 `protocol/kadv6/` 是独立实现；`docs/kadv6-protocol*.md` 明确当前无桥接，仓库未见 Kad2 状态机。 | 无法参与对应网络或跨叠加层共享来源。 | 很高 | 先形成协议设计和安全边界 RFC；使用独立互操作节点验证路由、发布、搜索、去环和隐私，不与其他 P0/P1 改动同 PR。 |
 | **`NNN.part` 完成后重命名已覆盖最小闭环** | 仅 `UseEmuleTempLayout`：`finished()` 只排队 `AsyncRelease`；`OnReleaseFile` 在句柄关闭后把 `001`–`999.part` 搬到 Settings 已有 `IncomingDir`（空则 part 所在目录，不发明默认路径）。目标已存在一律 `name (n).ext`，不按同大小当崩溃重试。同卷 `Rename`，仅 EXDEV/Windows 跨卷回退 copy（Linux errno 17 不当跨卷）。旁注删除 `.met` / `.part.met`。`FinalName` 随 state 保存。恢复已完成 `.part` 会再 promote。未做跨卷事务日志或 Windows 占用重试队列。 | 临时布局完成后不再长期停在 `001.part`。目标冲突不覆盖已有文件。未完成释放不搬运。 | 中 | 已有同目录改名、Incoming 冲突、同大小不覆盖、EXDEV copy、非跨卷失败保留源、`finished()` 须等释放、关闭布局不搬、恢复已完成 `.part`、未完成不搬、Linux EEXIST 测试。 |
 | **真实互操作与 fuzz 矩阵不足** | `protocol_e2e_test.go`、`phase_h_test.go` 以本实现双端/本地 fixture 为主；仓库未建立覆盖关键解析器的持续 fuzz corpus，也没有多版本 eMule/aMule 矩阵。 | 自洽实现可能双方共同犯错，边界包、畸形包和版本差异难以及时发现。 | 高（持续） | 建立 Windows eMule、Linux/macOS aMule、多版本、HighID/LowID、明文/混淆、大文件矩阵；对 Hello、标签、Queue/ReAsk、MultiPacket、Kad、`.part.met` 等解析器运行持续 fuzz，并归档抓包 fixture。 |
-| **其余有证据、可做的小项（未做）** | `IncomingDir` 未纳入可持久化 Settings 子集。搜索不支持括号/引号。UDPVer 2+ part status 未做。macOS 仍仅 Truncate。 | 目录恢复、复杂搜索与高 UDPVer 仍与 eMule 有差距。 | 中 | 各项需独立 PR；本路线图不再混提。 |
-| **刻意不做 / 证据不足的剩余** | MultiPacket EXT2 出站（线格式已核对错误，保持禁用）。IRC、浏览共享、Kad2、完整 Buddy 隧道、Captcha UI。Kad/KADV6 路由失败阈值与 Policy `MaxFailCount` 是否应对齐尚无官方证据。 | 不会发出错误 MultiPacket；高级社交/NAT 能力低于完整客户端。 | — | 无新实现 PR。 |
+| **其余曾标可做、本路线图明确不做或需用户决策** | `IncomingDir` 不写入可持久化 Settings：bootstrap Overlay 会用空 Config 冲掉导入值，且用户要求不发明全局默认路径。括号/引号搜索需独立语法与 Kad 分词设计，不是最小布尔补丁。UDPVer 2+ part status 需新线格式与 Hello 能力位，不能混进已覆盖的 UDPVer=1。macOS `F_PREALLOCATE` 需 Darwin CI 与占盘证据，当前门禁只有 Ubuntu/Windows。KADV6 公网 job、完整互操作/fuzz 矩阵依赖专用环境，超出本仓库常规 CI。KADV6 LowID 标签、Kad 路由 FailCount 是否对齐 Policy 尚无官方证据。 | 重启后 Incoming 仍靠本次进程/导入写入；复杂搜索、高 UDPVer、macOS 占盘与公网 IPv6 不在本路线图交付。 | — | 需新立项或用户明确决策后再做。本路线图不再开这些实现 PR。 |
+| **刻意不做** | MultiPacket EXT2 出站（线格式已核对错误，保持禁用且不宣告）。IRC、浏览共享、Kad2、完整 Buddy 隧道、Captcha UI。 | 不会发出错误 MultiPacket；高级社交/NAT/验证码能力低于完整客户端。 | — | 无新实现 PR。 |
 
 ## 6. 分步 PR 顺序
 
@@ -82,7 +82,7 @@
 13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
 14. **KADV6 真实 IPv6 CI（单测已不依赖本机公网 IPv6）**：发布端点可注入，`TestMain` 默认禁用公网探测；可选 `GOED2K_RUN_KADV6_INTEGRATION=1` 仍走真实出站地址。公网 bootstrap/远端搜索的专用 job 仍待后续。
 15. **Settings/state 一致性（已覆盖可持久化策略）**：Config/env/CLI 映射与 v8 快照/恢复、从未发布的 5/6 按 v7 兼容升级、自动保存失败可观测且按间隔重试。过程调优字段仍刻意不持久化。
-16. **P2 项目**：Server 最小布尔、KADV6 `StartSearch`、`NNN.part` 搬运、`Settings.MaxFailCount`/`MaxPeerListSize` 接入 Policy 已覆盖。其余可做小项见上表（IncomingDir 持久化、括号搜索、UDPVer 2+、macOS 预分配）。Buddy/Kad2/IRC/浏览共享/Captcha/MultiPacket 出站刻意不做。
+16. **P2 与路线图收口**：Server 最小布尔、KADV6 `StartSearch`、`NNN.part` 释放后搬运、`Settings.MaxFailCount`/`MaxPeerListSize` 接入 Policy 已覆盖。其余曾标可做项（IncomingDir 持久化、括号搜索、UDPVer 2+、macOS 预分配、公网 IPv6 CI、互操作/fuzz）已标明不做或需用户决策。Buddy/Kad2/IRC/浏览共享/Captcha/MultiPacket 出站刻意不做。**本路线图结束，不再从本文自动开实现 PR。**
 
 ## 7. 多轮审计门禁
 

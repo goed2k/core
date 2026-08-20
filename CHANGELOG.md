@@ -16,6 +16,7 @@
 - `UseEmuleTempLayout` 任务在释放文件句柄后把 `NNN.part` 搬到清洗后的最终文件名。目标目录优先已接入 Settings 的 `IncomingDir`（eMule 导入写入；空则用 part 所在目录，不发明默认 Incoming 路径）。目标已存在则改用 `name (n).ext`，不覆盖。同卷 `Rename`，仅跨卷失败时复制后删源。完成后删除 `.part.met` 旁注。`FinalName` 随任务 state 保存。
 - 服务器搜索支持最小布尔查询：`OR` / `NOT` / `-word`，默认 AND，左结合；过滤条件仍 AND。不支持括号。默认 AND 词仍按原标点切开以对齐 Kad 索引；OR/NOT/`-word` 操作数保持整词。`TokenizeSearchQuery` 跳过 NOT 操作数。
 - `StartSearch` 在 `SearchScopeDHT`/`All` 下，若已设置 KADV6 tracker 则同时启动 KADV6 关键字搜索，与 Kad4 结果按文件 hash 合并去重。无节点时不拨号。
+- 兼容路线图收口：其余曾标可做项（IncomingDir 持久化、括号搜索、UDPVer 2+、macOS 预分配、公网 IPv6 CI、互操作矩阵）标明不做或需用户决策；IRC/浏览共享/Kad2/完整 Buddy/Captcha/MultiPacket 出站刻意不做。
 - `Policy.IsConnectCandidate` 使用 `Settings.MaxFailCount`（默认 20），不再硬编码 10。无 Settings 或 `<=0` 时回落 20。
 - `Policy.AddPeer` / `ErasePeers` 使用 `Settings.MaxPeerListSize`（默认 100），不再只读包常量。无 Settings 或 `<=0` 时回落包常量 100。
 
