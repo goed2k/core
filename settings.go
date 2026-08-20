@@ -51,7 +51,7 @@ type Settings struct {
 	UseEmuleTempLayout      bool
 	// IncomingDir 是 UseEmuleTempLayout 完成后的目标目录。
 	// 仅当调用方或 eMule 导入显式设置时使用；空则改到 NNN.part 所在目录。
-	// 不发明默认 Incoming 路径，也不纳入可持久化 Settings 子集。
+	// 不发明默认 Incoming 路径。会写入可持久化 Settings 子集；Overlay 时空值不覆盖已恢复的非空值。
 	IncomingDir       string
 	PartialKadPublish bool
 	// PreallocateDiskSpace 为 true 时，创建任务会把数据文件扩展到完整 Size。

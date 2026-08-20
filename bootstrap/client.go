@@ -90,6 +90,7 @@ func InitClient(cfg Config, logger *slog.Logger) (*ed2k.Client, error) {
 			return nil, fmt.Errorf("load state: %w", err)
 		}
 		// bootstrap/CLI 配置覆盖状态里恢复的可持久化策略，避免旧 state 压过本次启动参数。
+		// 空路径字段不覆盖 LoadState 已恢复的非空 IncomingDir / WebCacheDir。
 		client.OverlayPersistableSettings(settings)
 	}
 

@@ -47,6 +47,7 @@ func TestPersistableSettingsRoundTrip(t *testing.T) {
 	settings.MaxHttpSources = 7
 	settings.MaxConcurrentHttpBlocks = 3
 	settings.WebCacheDir = filepath.Join(t.TempDir(), "httpcache")
+	settings.IncomingDir = filepath.Join(t.TempDir(), "incoming")
 	settings.HttpRequestTimeoutSec = 12
 	settings.MaxDownloadRateKB = 128
 	settings.MaxUploadRateKB = 64
@@ -279,5 +280,74 @@ func TestEphemeralSettingsStayProcessLocal(t *testing.T) {
 	}
 	if other.session.settings.MaxPeerListSize == 42 {
 		t.Fatal("MaxPeerListSize should not be restored from state")
+	}
+}
+
+func TestOverlayEmptyPathsKeepRestoredIncomingAndWebCache(t *testing.T) {
+	dir := t.TempDir()
+	incoming := filepath.Join(dir, "incoming")
+	cache := filepath.Join(dir, "cache")
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.IncomingDir = incoming
+	settings.WebCacheDir = cache
+	settings.MaxDownloadRateKB = 10
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	path := filepath.Join(dir, "state.json")
+	client.SetStatePath(path)
+	if err := client.SaveState(""); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, restored)
+	if err := restored.LoadState(path); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	overlay := NewSettings()
+	overlay.MaxDownloadRateKB = 99
+	restored.OverlayPersistableSettings(overlay)
+	got := restored.PersistableSettings()
+	if got.IncomingDir != incoming {
+		t.Fatalf("empty IncomingDir overlay wiped restored value: %q", got.IncomingDir)
+	}
+	if got.WebCacheDir != cache {
+		t.Fatalf("empty WebCacheDir overlay wiped restored value: %q", got.WebCacheDir)
+	}
+	if got.MaxDownloadRateKB != 99 {
+		t.Fatalf("non-path overlay should win: %d", got.MaxDownloadRateKB)
+	}
+}
+
+func TestOverlayNonEmptyPathsReplaceRestored(t *testing.T) {
+	dir := t.TempDir()
+	settings := NewSettings()
+	settings.ListenPort = 0
+	settings.IncomingDir = filepath.Join(dir, "old-in")
+	settings.WebCacheDir = filepath.Join(dir, "old-cache")
+	client := NewClient(settings)
+	registerClientTransferFileCleanup(t, client)
+	path := filepath.Join(dir, "state.json")
+	client.SetStatePath(path)
+	if err := client.SaveState(""); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := NewClient(NewSettings())
+	registerClientTransferFileCleanup(t, restored)
+	if err := restored.LoadState(path); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	overlay := NewSettings()
+	overlay.IncomingDir = filepath.Join(dir, "new-in")
+	overlay.WebCacheDir = filepath.Join(dir, "new-cache")
+	restored.OverlayPersistableSettings(overlay)
+	got := restored.PersistableSettings()
+	if got.IncomingDir != overlay.IncomingDir {
+		t.Fatalf("non-empty IncomingDir should replace: %q", got.IncomingDir)
+	}
+	if got.WebCacheDir != overlay.WebCacheDir {
+		t.Fatalf("non-empty WebCacheDir should replace: %q", got.WebCacheDir)
 	}
 }

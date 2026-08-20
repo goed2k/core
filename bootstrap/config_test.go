@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -97,6 +98,9 @@ func TestBuildSettingsMapsPolicyFields(t *testing.T) {
 	if settings.MaxDownloadRateKB != 256 || settings.MaxUploadRateKB != 32 {
 		t.Fatalf("rates %d/%d", settings.MaxDownloadRateKB, settings.MaxUploadRateKB)
 	}
+	if settings.IncomingDir != "" {
+		t.Fatalf("BuildSettings must not invent IncomingDir: %q", settings.IncomingDir)
+	}
 }
 
 func TestDefaultConfigAlignsPersistableSettings(t *testing.T) {
@@ -174,6 +178,55 @@ func TestInitClientConfigWinsOverRestoredSettings(t *testing.T) {
 	}
 	if snap.MaxDownloadRateKB != 99 {
 		t.Fatalf("config should win over restored rate: %d", snap.MaxDownloadRateKB)
+	}
+}
+
+func TestInitClientEmptyPathsKeepRestoredIncomingAndWebCache(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	incoming := filepath.Join(dir, "incoming")
+	cache := filepath.Join(dir, "webcache")
+	raw, err := json.Marshal(ed2k.ClientState{
+		Version: 9,
+		Settings: &ed2k.ClientSettingsState{
+			IncomingDir:             incoming,
+			WebCacheDir:             cache,
+			PartialKadPublish:       true,
+			EnableWebDownload:       true,
+			MaxHttpSources:          4,
+			MaxConcurrentHttpBlocks: 2,
+			HttpRequestTimeoutSec:   30,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.ListenPort = 0
+	cfg.UDPPort = 0
+	cfg.EnableKAD = false
+	cfg.EnableKADV6 = false
+	cfg.EnableUPnP = false
+	cfg.ServerAddr = ""
+	cfg.ServerMetPath = ""
+	cfg.KADNodesDat = ""
+	cfg.StatePath = statePath
+	cfg.DisableState = false
+	client, err := InitClient(cfg, nil)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer client.Close()
+	snap := client.PersistableSettings()
+	if snap.IncomingDir != incoming {
+		t.Fatalf("empty Config IncomingDir must not wipe restored: %q", snap.IncomingDir)
+	}
+	if snap.WebCacheDir != cache {
+		t.Fatalf("empty Config WebCacheDir must not wipe restored: %q", snap.WebCacheDir)
 	}
 }
 
