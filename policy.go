@@ -213,6 +213,9 @@ func (p *Policy) ConnectOnePeer(sessionTime int64) (bool, error) {
 		if !IsLowID(p.transfer.session.GetClientID()) {
 			if p.transfer.session.RequestServerCallback(p.transfer, peerInfo.ServerClientID) {
 				peerInfo.LastConnected = sessionTime
+				if _, queued := peerInfo.RemoteQueueState(); queued {
+					p.deferRemoteQueueReask(peerInfo, sessionTime)
+				}
 				return true, nil
 			}
 			return false, nil
@@ -242,8 +245,15 @@ func (p *Policy) ConnectionClosed(c *PeerConnection, sessionTime int64) {
 		peer.LastConnected = 0
 		return
 	case QueueRanking.Code():
-		peer.LastConnected = sessionTime
-		peer.markRemoteQueued(c.remoteQueueRank, sessionTime+remoteQueueReaskInterval)
+		queuePeer := peer
+		if callbackPeer := p.callbackPeer(c.callbackClientID); callbackPeer != nil {
+			queuePeer = callbackPeer
+		}
+		queuePeer.LastConnected = sessionTime
+		queuePeer.markRemoteQueued(c.remoteQueueRank, sessionTime+remoteQueueReaskInterval)
+		if queuePeer != peer && !peer.Connectable {
+			p.removePeer(*peer)
+		}
 		return
 	}
 	peer.LastConnected = sessionTime
@@ -284,9 +294,27 @@ func (p *Policy) peerForConnection(c *PeerConnection) *Peer {
 }
 
 func (p *Policy) ClearRemoteQueue(c *PeerConnection) {
+	if c == nil {
+		return
+	}
 	if peer := p.peerForConnection(c); peer != nil {
 		peer.clearRemoteQueue()
 	}
+	if peer := p.callbackPeer(c.callbackClientID); peer != nil {
+		peer.clearRemoteQueue()
+	}
+}
+
+func (p *Policy) callbackPeer(clientID int32) *Peer {
+	if p == nil || clientID == 0 {
+		return nil
+	}
+	for i := range p.peers {
+		if p.peers[i].ServerClientID == clientID {
+			return &p.peers[i]
+		}
+	}
+	return nil
 }
 
 func (p *Policy) SetConnection(peer *Peer, c *PeerConnection) {

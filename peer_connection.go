@@ -160,6 +160,7 @@ type PeerConnection struct {
 	remotePeerInfo     RemotePeerInfo
 	remoteHash         protocol.Hash
 	transfer           *Transfer
+	callbackClientID   int32
 	remotePieces       protocol.BitField
 	speed              PeerSpeed
 	peerInfo           *Peer

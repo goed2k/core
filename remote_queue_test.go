@@ -221,3 +221,88 @@ func TestQueuedPeerPauseResumeAndFailedReaskKeepDeadline(t *testing.T) {
 		t.Fatalf("失败重询应重新设置安全期限: got=%d want=%d", stored.NextConnection, sessionTime+remoteQueueReaskInterval)
 	}
 }
+
+func TestQueuedLowIDCallbackRenewsReaskDeadline(t *testing.T) {
+	const sessionTime int64 = 60_000_000
+	session, transfer := newTestTransfer(t)
+	previousTime := currentCachedTime.Swap(sessionTime)
+	t.Cleanup(func() { currentCachedTime.Store(previousTime) })
+	session.clientID = 0x0100007f
+	server := NewServerConnection("srv", nil, session)
+	server.handshakeCompleted = true
+	session.serverConnection = server
+
+	peer := NewPeerWithSource(protocol.Endpoint{}, true, int(PeerServer))
+	peer.ServerClientID = 4242
+	peer.markRemoteQueued(11, sessionTime)
+	if _, err := transfer.policy.AddPeer(peer); err != nil {
+		t.Fatalf("添加 LowID 来源失败: %v", err)
+	}
+
+	connected, err := transfer.policy.ConnectOnePeer(sessionTime)
+	if err != nil {
+		t.Fatalf("请求服务器回调失败: %v", err)
+	}
+	if !connected {
+		t.Fatal("到期的 LowID 排队来源应发起服务器回调")
+	}
+	stored := &transfer.policy.peers[0]
+	if stored.NextConnection != sessionTime+remoteQueueReaskInterval {
+		t.Fatalf("发出回调后应续设重询期限: got=%d want=%d", stored.NextConnection, sessionTime+remoteQueueReaskInterval)
+	}
+	if candidate := transfer.policy.FindConnectCandidate(sessionTime + 1); candidate != nil {
+		t.Fatal("服务器回调发出后不应在短退避内重复选择同一来源")
+	}
+}
+
+func TestLowIDCallbackQueueStateUsesServerIdentity(t *testing.T) {
+	const (
+		sessionTime int64 = 70_000_000
+		clientID    int32 = 5252
+	)
+	session, transfer := newTestTransfer(t)
+	previousTime := currentCachedTime.Swap(sessionTime)
+	t.Cleanup(func() { currentCachedTime.Store(previousTime) })
+
+	placeholder := NewPeerWithSource(protocol.Endpoint{}, true, int(PeerServer))
+	placeholder.ServerClientID = clientID
+	if _, err := transfer.policy.AddPeer(placeholder); err != nil {
+		t.Fatalf("添加 LowID 占位来源失败: %v", err)
+	}
+	callbackEndpoint, err := protocol.EndpointFromString("7.8.9.10", 4662)
+	if err != nil {
+		t.Fatalf("构造回调端点失败: %v", err)
+	}
+	callback := NewPeerConnection(session, callbackEndpoint, nil, nil)
+	callback.callbackClientID = clientID
+	if err := transfer.AttachIncomingPeer(callback); err != nil {
+		t.Fatalf("关联回调连接失败: %v", err)
+	}
+	callback.HandleQueueRanking(&clientproto.QueueRanking{Rank: 13})
+	callback.OnDisconnect(QueueRanking)
+
+	stored := transfer.policy.callbackPeer(clientID)
+	if stored == nil {
+		t.Fatal("QueueRanking 后应保留 ServerClientID 逻辑来源")
+	}
+	if rank, queued := stored.RemoteQueueState(); !queued || rank != 13 {
+		t.Fatalf("回调连接的排队状态应写入 LowID 逻辑来源: queued=%t rank=%d", queued, rank)
+	}
+	if stored.NextConnection != sessionTime+remoteQueueReaskInterval {
+		t.Fatalf("LowID 逻辑来源重询期限不正确: got=%d want=%d", stored.NextConnection, sessionTime+remoteQueueReaskInterval)
+	}
+	if transfer.policy.FindPeer(callbackEndpoint) != nil {
+		t.Fatal("QueueRanking 断开后不应留下不可重连的回调端点来源")
+	}
+
+	accepted := NewPeerConnection(session, callbackEndpoint, nil, nil)
+	accepted.callbackClientID = clientID
+	if err := transfer.AttachIncomingPeer(accepted); err != nil {
+		t.Fatalf("重新关联回调连接失败: %v", err)
+	}
+	accepted.HandleAcceptUpload()
+	stored = transfer.policy.callbackPeer(clientID)
+	if rank, queued := stored.RemoteQueueState(); queued || rank != 0 {
+		t.Fatalf("回调来源 AcceptUpload 应清除逻辑排队状态: queued=%t rank=%d", queued, rank)
+	}
+}
