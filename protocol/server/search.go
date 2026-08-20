@@ -399,7 +399,7 @@ func parseSearchQuery(query string) (ops []byte, words []string) {
 			appendWord(word, searchBoolNOT, true)
 			continue
 		}
-		if hasPending {
+		if hasPending && pendingOp != searchBoolAND {
 			word := strings.Trim(field, "()[]{}<>,._!?:;\\/\"")
 			appendWord(word, 0, false)
 			continue
