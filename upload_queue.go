@@ -1,6 +1,7 @@
 package goed2k
 
 import (
+	"net"
 	"slices"
 
 	"github.com/goed2k/core/protocol"
@@ -150,6 +151,52 @@ func (q *UploadQueue) IsOnUploadQueue(client *PeerConnection) bool {
 
 func (q *UploadQueue) IsUploading(client *PeerConnection) bool {
 	return slices.Index(q.uploading, client) >= 0
+}
+
+// FindWaitingByIPUDP 按 UDP 来源 IP+端口和文件 hash 查找等待项。
+// 多个匹配时返回 multiple=true 且 client=nil，迫使对端走 TCP。
+func (q *UploadQueue) FindWaitingByIPUDP(addr *net.UDPAddr, hash protocol.Hash) (client *PeerConnection, multiple bool) {
+	if q == nil || addr == nil {
+		return nil, false
+	}
+	var found *PeerConnection
+	count := 0
+	for _, current := range q.waiting {
+		if !uploadClientMatchesUDP(current, addr) {
+			continue
+		}
+		src := current.ActiveUploadSource()
+		if src == nil || !src.GetHash().Equal(hash) {
+			continue
+		}
+		count++
+		found = current
+	}
+	if count > 1 {
+		return nil, true
+	}
+	return found, false
+}
+
+// RefreshWaitingAsk 刷新等待项的最近询问时间并返回当前 rank。
+func (q *UploadQueue) RefreshWaitingAsk(client *PeerConnection) uint16 {
+	if q == nil || client == nil {
+		return 0
+	}
+	client.lastUploadRequest = CurrentTime()
+	return client.UploadQueueRank()
+}
+
+// IsNearlyFull 对齐 eMule：等待人数 + 50 超过队列上限时，对未知请求方回复 QueueFull。
+func (q *UploadQueue) IsNearlyFull() bool {
+	if q == nil || q.session == nil {
+		return false
+	}
+	size := q.session.settings.UploadQueueSize
+	if size <= 0 {
+		return false
+	}
+	return len(q.waiting)+clientUDPQueueFullSlack > size
 }
 
 func (q *UploadQueue) sortWaiting() {

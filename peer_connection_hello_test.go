@@ -124,6 +124,7 @@ func TestPrepareHelloAnswerAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	}
 	wantMisc1 := uint32((1 << aichVersionOffset) |
 		(1 << unicodeSupportOffset) |
+		(clientUDPReaskVersion << udpVersionOffset) |
 		(session.GetCompressionVersion() << dataCompressionOffset) |
 		(1 << sourceExchange1Offset) |
 		(1 << noViewSharedFilesOffset))
@@ -136,13 +137,17 @@ func TestPrepareHelloAnswerAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 
 	if remote.Misc1.AICHVersion != 1 ||
 		remote.Misc1.UnicodeSupport != 1 ||
+		remote.Misc1.UDPVer != clientUDPReaskVersion ||
 		remote.Misc1.DataCompVer != session.GetCompressionVersion() ||
 		remote.Misc1.SourceExchange1Ver != 1 ||
 		remote.Misc1.NoViewSharedFiles != 1 {
 		t.Fatalf("Hello 缺少已实现的 MiscOptions 能力: %+v", remote.Misc1)
 	}
-	if remote.Misc1.UDPVer != 0 || remote.Misc1.MultiPacket != 0 || remote.Misc1.SupportsPreview != 0 {
+	if remote.Misc1.UDPVer != clientUDPReaskVersion || remote.Misc1.MultiPacket != 0 || remote.Misc1.SupportsPreview != 0 {
 		t.Fatalf("Hello 声明了尚未完整实现的 MiscOptions 能力: %+v", remote.Misc1)
+	}
+	if remote.UDPPort != uint16(session.GetUDPPort()) {
+		t.Fatalf("Hello 应宣告客户端 UDP 端口: got %d want %d", remote.UDPPort, session.GetUDPPort())
 	}
 
 	wantMisc2 := (1 << largeFileOffset) | (1 << srcExtOffset)

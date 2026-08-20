@@ -102,7 +102,7 @@ func (t *DHTTracker) UDPConn() *net.UDPConn {
 	return t.conn
 }
 
-// SetED2KUDPHandler 在非 Kad 包（首字节 0xe3）到达时回调，例如 OP_GLOBSERVSTATRES。
+// SetED2KUDPHandler 在非 Kad 包到达时回调：0xE3（如 OP_GLOBSERVSTATRES）或 0xC5（客户端 UDP ReAsk）。
 func (t *DHTTracker) SetED2KUDPHandler(h func(*net.UDPAddr, []byte)) {
 	t.mu.Lock()
 	t.ed2kUDPHandler = h
@@ -221,7 +221,7 @@ func (t *DHTTracker) readLoop() {
 			continue
 		}
 		addr = normalizeUDPAddr(addr)
-		if n >= 26 && buffer[0] == 0xe3 {
+		if n >= 2 && isED2KUDPProtocol(buffer[0]) {
 			t.mu.Lock()
 			h := t.ed2kUDPHandler
 			t.mu.Unlock()

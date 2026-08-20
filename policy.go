@@ -226,6 +226,11 @@ func (p *Policy) ConnectOnePeer(sessionTime int64) (bool, error) {
 			return false, nil
 		}
 	}
+	if _, queued := peerInfo.RemoteQueueState(); queued && !peerInfo.udpReaskPending && p.transfer != nil && p.transfer.session != nil {
+		if p.transfer.session.tryUDPReaskQueuedPeer(p.transfer, peerInfo, sessionTime) {
+			return true, nil
+		}
+	}
 	_, err := p.transfer.ConnectToPeer(peerInfo)
 	if err != nil {
 		return false, err
