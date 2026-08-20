@@ -31,11 +31,18 @@ func NewPolicy(t *Transfer) Policy {
 	}
 }
 
+func (p Policy) maxFailCount() int {
+	if p.transfer != nil && p.transfer.session != nil && p.transfer.session.settings.MaxFailCount > 0 {
+		return p.transfer.session.settings.MaxFailCount
+	}
+	return 20
+}
+
 func (p Policy) IsConnectCandidate(pe Peer) bool {
 	if pe.Connection != nil || !pe.Connectable {
 		return false
 	}
-	if pe.FailCount > 10 {
+	if pe.FailCount > p.maxFailCount() {
 		if _, queued := pe.RemoteQueueState(); !queued {
 			return false
 		}
