@@ -174,7 +174,7 @@ func TestUploadUDPReaskAckForKnownQueuedFile(t *testing.T) {
 	peer.UDPPort = uint16(peerAddr.Port)
 	conn.SetUploadState(UploadStateOnQueue)
 	conn.SetUploadQueueRank(7)
-	session.UploadQueue().waiting = append(session.UploadQueue().waiting, conn)
+	session.UploadQueue().waiting = append(session.UploadQueue().waiting, newUploadWaiterFromClient(conn))
 
 	session.handleClientUDP(peerAddr, encodeReaskFilePing(transfer.GetHash()))
 	pkt := readUDPPacket(t, remote)
@@ -348,7 +348,7 @@ func TestUploadUDPReaskUsesFileHashToDisambiguateWaitingClients(t *testing.T) {
 	secondConn.SetUploadState(UploadStateOnQueue)
 	secondConn.SetUploadQueueRank(11)
 	q := session.UploadQueue()
-	q.waiting = append(q.waiting, firstConn, secondConn)
+	q.waiting = append(q.waiting, newUploadWaiterFromClient(firstConn), newUploadWaiterFromClient(secondConn))
 
 	session.handleClientUDP(peerAddr, encodeReaskFilePing(second.GetHash()))
 	pkt := readUDPPacket(t, remote)

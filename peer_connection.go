@@ -298,7 +298,7 @@ func (p *PeerConnection) OnDisconnect(ec BaseErrorCode) {
 		p.failed = true
 	}
 	if q := p.session.UploadQueue(); q != nil {
-		q.RemoveFromUploadQueue(p)
+		q.onClientDisconnect(p)
 	}
 	if p.transfer != nil {
 		transfer := p.transfer

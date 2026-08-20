@@ -112,13 +112,12 @@ func (s *Session) handleUDPReaskFilePing(addr *net.UDPAddr, payload []byte) {
 		s.sendClientUDP(addr, encodeFileNotFound())
 		return
 	}
-	client, multiple := s.UploadQueue().FindWaitingByIPUDP(addr, hash)
+	rank, found, multiple := s.UploadQueue().RefreshWaitingByIPUDP(addr, hash)
 	if multiple {
 		// 同 IP+UDP 且同一文件出现多个等待项时不回答，迫使对端走 TCP。
 		return
 	}
-	if client != nil {
-		rank := s.UploadQueue().RefreshWaitingAsk(client)
+	if found {
 		s.sendClientUDP(addr, encodeReaskAck(rank))
 		return
 	}
