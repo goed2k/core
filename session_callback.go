@@ -82,6 +82,7 @@ func (s *Session) tryAttachCallbackPeer(pc *PeerConnection, remoteClientID int32
 	if t == nil {
 		return
 	}
+	pc.callbackClientID = remoteClientID
 	if err := t.AttachIncomingPeer(pc); err != nil {
 		return
 	}

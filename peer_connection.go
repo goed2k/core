@@ -160,6 +160,7 @@ type PeerConnection struct {
 	remotePeerInfo     RemotePeerInfo
 	remoteHash         protocol.Hash
 	transfer           *Transfer
+	callbackClientID   int32
 	remotePieces       protocol.BitField
 	speed              PeerSpeed
 	peerInfo           *Peer
@@ -171,6 +172,7 @@ type PeerConnection struct {
 	endpoint           protocol.Endpoint
 	combiner           protocol.PacketCombiner
 	downloadQueue      []PendingBlock
+	remoteQueueRank    uint16
 	uploadState        UploadState
 	uploadQueueRank    uint16
 	uploadWaitStart    int64
@@ -291,7 +293,7 @@ func (p *PeerConnection) Connect() error {
 
 func (p *PeerConnection) OnDisconnect(ec BaseErrorCode) {
 	debugPeerf("peer %s disconnect code=%d", p.endpoint.String(), ec.Code())
-	if ec.Code() != NoError.Code() && ec.Code() != TransferPaused.Code() {
+	if ec.Code() != NoError.Code() && ec.Code() != TransferPaused.Code() && ec.Code() != QueueRanking.Code() {
 		p.failed = true
 	}
 	if q := p.session.UploadQueue(); q != nil {
@@ -642,6 +644,37 @@ func (p *PeerConnection) SendQueueRanking(rank uint16) {
 	if raw, err := p.combiner.Pack("client.QueueRanking", &packet); err == nil {
 		p.QueuePacket(raw)
 	}
+}
+
+func (p *PeerConnection) HandleQueueRanking(value *clientproto.QueueRanking) {
+	if value == nil {
+		return
+	}
+	p.remoteQueueRank = value.Rank
+	debugPeerf("peer %s <- QueueRanking rank=%d", p.endpoint.String(), value.Rank)
+	p.Close(QueueRanking)
+}
+
+func (p *PeerConnection) clearRemoteQueueState() {
+	if p == nil || p.peerInfo == nil {
+		return
+	}
+	if p.transfer == nil {
+		p.peerInfo.clearRemoteQueue()
+		return
+	}
+	if p.transfer.session != nil {
+		p.transfer.session.mu.Lock()
+		defer p.transfer.session.mu.Unlock()
+	}
+	p.transfer.policy.ClearRemoteQueue(p)
+}
+
+func (p *PeerConnection) HandleAcceptUpload() {
+	debugPeerf("peer %s <- AcceptUpload", p.endpoint.String())
+	p.clearRemoteQueueState()
+	p.maybeSendPreviewRequest()
+	p.RequestBlocks()
 }
 
 func (p *PeerConnection) SendOutOfParts() {
@@ -1252,9 +1285,7 @@ func (p *PeerConnection) ProcessIncoming() error {
 				}
 			}
 		case *clientproto.AcceptUpload:
-			debugPeerf("peer %s <- AcceptUpload", p.endpoint.String())
-			p.maybeSendPreviewRequest()
-			p.RequestBlocks()
+			p.HandleAcceptUpload()
 		case *clientproto.StartUpload:
 			p.HandleClientStartUpload(value)
 		case *clientproto.RequestParts32:
@@ -1268,8 +1299,7 @@ func (p *PeerConnection) ProcessIncoming() error {
 		case *clientproto.CancelTransfer:
 			p.HandleClientCancelTransfer()
 		case *clientproto.QueueRanking:
-			debugPeerf("peer %s <- QueueRanking", p.endpoint.String())
-			p.Close(QueueRanking)
+			p.HandleQueueRanking(value)
 		case *clientproto.FileComment:
 			p.HandleFileComment(value)
 		case *clientproto.SendingPart32:
@@ -1475,6 +1505,7 @@ func (p *PeerConnection) ReceiveCompressedData(header protocol.PacketHeader, off
 }
 
 func (p *PeerConnection) ReceiveData(req data.PeerRequest, compressed bool) {
+	p.clearRemoteQueueState()
 	p.transferringData = true
 	p.recvReq = req
 	p.recvPos = 0

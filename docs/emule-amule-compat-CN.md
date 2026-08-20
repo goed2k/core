@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `89eaf85`（2026-08-20 审查）。
+- **基线**：`main` 分支提交 `a42645c`（2026-08-20 审查）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -33,7 +33,7 @@
 
 | 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
 |---|---|---|---|---|
-| **上传排队身份和 ReAsk 生命周期不闭环** | 下载侧收到 `QueueRanking` 后在 `peer_connection.go:ProcessIncoming` 调用 `Close(QueueRanking)`；`QueueRanking` 是非零错误码，`OnDisconnect` 会标记失败并移除连接。上传侧 `upload_queue.go` 的等待项是 `[]*PeerConnection`，`OnDisconnect` 会删除它；`lastUploadRequest`、rank、等待起点也都绑定连接。未见跨连接队列身份或标准周期 ReAsk 调度。 | 客户端可能收到排队名次后丢失来源/等待资格，重连后无法连续累计队列时间，长队列下载难以开始。**断开 TCP 本身并不必然不兼容**；问题是缺少稳定身份、重询和重新关联闭环。 | 高 | 先做纯状态机测试：QueueRanking 不计为来源失败；断线后以 UserHash/文件 hash 等稳定键保留等待身份；周期 ReAsk 后恢复 rank；HighID/LowID、超时、取消和重复连接均覆盖。再与 eMule/aMule 长队列抓包联调。 |
+| **下载侧 TCP QueueRanking/重询语义已覆盖；上传侧跨连接排队身份仍未完成** | 下载侧会把远端 rank、排队状态和下一次重询期限保存在逻辑 `Peer` 中；收到 `QueueRanking` 后允许关闭 TCP，但 `Policy` 不增加 `FailCount`，并按 eMule `FILEREASKTIME`（29 分钟）阻止提前重连；同一来源重询会更新 rank，`AcceptUpload` 或实际下载开始会清理状态。上传侧 `upload_queue.go` 的等待项仍是 `[]*PeerConnection`，断开会删除等待项，rank 与等待起点仍绑定连接。 | 下载侧正常排队不再被误记为坏来源，也不会因 TCP 关闭立即重连；但本客户端作为上传方时，仍不能让远端在 TCP 重连后凭稳定身份延续等待时间。**TCP 断开本身不是缺陷，逻辑队列状态与按期重询才是兼容重点。** | 高 | 已有可控时钟状态机测试覆盖 QueueRanking→断开→到期重询→AcceptUpload/下载及普通错误回归；仍需 eMule/aMule 长队列抓包联调。上传侧后续以 UserHash/文件 hash 等稳定键覆盖超时、取消和重复连接。 |
 | **客户端 UDP ReAsk 不是标准 OP_REASKFILEPING** | `client_udp.go` 只发送 6 字节：协议头、`0x90` 和两个端口；未携带标准请求所需的至少 16 字节文件 hash。ACK 仅 2 字节，未带 queue rank，也没有 FileNotFound/QueueFull 分支。 | 对端无法识别具体文件和真实排队状态；当前实现不能表述为“协议完成、只差业务接入”。 | 高 | 为 Ping、ACK、FileNotFound、QueueFull 建立 golden bytes；用真实抓包校对操作码、字段顺序、长度和版本条件；验证收到 rank 后更新同一跨连接队列身份，并覆盖畸形包和未知文件。 |
 | **普通块边界为 190 KiB，与主流 180 KiB 不一致** | `constants.go` 的 `BlockSize=190*1024`，`data/peer_request.go` 的 `prBlockSize` 同为 190 KiB；该值进入 picker、磁盘偏移、请求、接收、HTTP Range、`.part.met` gap 和 AICH 重置映射。`aich.go` 的 `AICHBlockSize=180*1024`。 | 边界差异可能影响与标准 BLOCKSIZE/EMBLOCKSIZE=180 KiB 的请求切分、断点区间和 AICH 坏块映射。现阶段证据不足，**不得直接断言一定导致数据损坏**。 | 高 | 先列出全链路边界清单，再用非整块尾部、跨块压缩包、64 位偏移、断点导入和 AICH 恢复做表驱动测试；加入 eMule/aMule 请求区间抓包对照后再改常量。 |
 | **Kad LowID 来源消费丢失语义，发布固定 HighID 类型** | `protocol/kad/types.go:SourceEndpoint` 接受多种 `SourceType`，但只返回 IP/端口；`session.go:SendDHTSourcesRequest` 随后直接 `AddPeer(endpoint, PeerDHT)`，没有保留 LowID、服务器、Buddy/回调标签。`dht_tracker.go:PublishSource` 将 `TagSourceType` 固定为 `1`。 | LowID 搜源结果可能被当作可直连 HighID，导致无效拨号；本机为 LowID 时仍发布 HighID 语义，其他客户端难以回调。 | 中高 | 为各 SourceType 建立结构化解析测试；HighID 走直连，LowID 保留 server/buddy/callback 元数据并进入对应策略；发布端按实际可达性输出标签。使用真实 LowID 节点联调。 |
@@ -66,9 +66,9 @@
 每个编号都是独立分支和独立 PR；前一项合并后才从最新 `main` 创建下一分支。不得把多个高风险协议改动塞进同一 PR。
 
 1. **能力位诚实性**：移除未实现 Captcha 声明，修正并测试大文件能力 getter；仅在有真实证据时调整其他位。这是低风险首个实现 PR。
-2. **跨连接上传队列身份**：引入稳定队列键和等待记录，使 TCP 断开不等于删除排队身份；只改队列模型与测试。
-3. **TCP QueueRanking/ReAsk 闭环**：QueueRanking 不再作为普通失败，按标准周期重询并重新关联第 2 步身份；完成 HighID/LowID、取消、超时闭环。完成此项前不转向其他功能项。
-4. **UDP ReAsk 线协议**：独立实现 Ping、ACK rank、FileNotFound、QueueFull 编解码和状态接入；必须先有真实 fixture。
+2. **下载侧 TCP QueueRanking/重询语义（已覆盖）**：QueueRanking 不作为普通失败；TCP 可关闭，但逻辑 `Peer` 保留 rank 与远端排队状态，并按 eMule 29 分钟周期重询；AcceptUpload 或实际下载开始时清理。
+3. **跨连接上传队列身份（未完成）**：引入稳定队列键和等待记录，使本客户端作为上传方时，TCP 断开不等于删除远端请求方的排队身份；只改上传队列模型与测试。
+4. **UDP ReAsk 线协议（未完成）**：独立实现标准 OP_REASKFILEPING、ACK rank、FileNotFound、QueueFull 编解码和状态接入；必须先有真实 fixture，不能以本次 TCP 重询代替。
 5. **180 KiB 边界审计与迁移**：先提交边界清单/测试，再在单独 PR 改全链路常量；如证据否定变更则关闭实现 PR 并更新本文。
 6. **Kad LowID 消费链路**：保留 SourceType、服务器/Buddy/回调语义并更新策略。
 7. **Kad 发布类型**：根据实际 HighID/LowID 和可达性生成来源标签，与第 6 步分开验证。
