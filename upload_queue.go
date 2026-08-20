@@ -65,6 +65,10 @@ func (q *UploadQueue) AddClientToQueue(client *PeerConnection) {
 		w.attach(client)
 		w.lastAsked = now
 		w.captureFromClient(client)
+		if q.isSuspended(w.fileHash) {
+			client.SendQueueRanking(w.rank)
+			return
+		}
 		maxSlots := q.maxSlots()
 		if w.addNextConnect && q.lastSlotHighID {
 			maxSlots++
@@ -323,10 +327,12 @@ func (q *UploadQueue) addUpNextClient(direct *PeerConnection) {
 			if candidate == nil {
 				continue
 			}
-			if !candidate.canTakeSlot() {
-				candidate.addNextConnect = true
-				if candidate.client != nil {
-					candidate.client.SetUploadAddNextConnect(true)
+			if q.isSuspended(candidate.fileHash) || !candidate.canTakeSlot() {
+				if !q.isSuspended(candidate.fileHash) {
+					candidate.addNextConnect = true
+					if candidate.client != nil {
+						candidate.client.SetUploadAddNextConnect(true)
+					}
 				}
 				continue
 			}

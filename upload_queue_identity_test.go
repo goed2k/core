@@ -218,6 +218,36 @@ func TestUploadQueueDropsConnectionBoundWaiterEvenWithUDPPort(t *testing.T) {
 	}
 }
 
+func TestUploadQueueSuspendedFileDoesNotPromoteOnReconnect(t *testing.T) {
+	session, transfer := newUploadableTestTransfer(t)
+	queue := session.UploadQueue()
+	fillUploadSlots(queue)
+
+	userHash := protocol.MustHashFromString("10101010101010101010101010101010")
+	conn := newQueuedUploadPeer(t, session, transfer, "10.0.0.11", 4662, userHash, 4672)
+	queue.AddClientToQueue(conn)
+	waitStart := conn.UploadWaitStart()
+	queue.onClientDisconnect(conn)
+	queue.waiting[0].addNextConnect = true
+	queue.SuspendUpload(transfer.GetHash(), false)
+	queue.uploading = queue.uploading[:len(queue.uploading)-1]
+	queue.lastSlotHighID = true
+
+	again := newQueuedUploadPeer(t, session, transfer, "10.0.0.11", 4663, userHash, 4672)
+	queue.AddClientToQueue(again)
+	if queue.IsUploading(again) {
+		t.Fatal("挂起文件的已有身份重连不得被提升到上传槽")
+	}
+	if again.UploadWaitStart() != waitStart {
+		t.Fatalf("挂起后重连仍应附着原等待身份: got=%d want=%d", again.UploadWaitStart(), waitStart)
+	}
+
+	queue.Process()
+	if queue.IsUploading(again) {
+		t.Fatal("Process 不得把挂起文件的等待项提升到上传槽")
+	}
+}
+
 func TestUploadUDPReaskFileNotFoundAndQueueFullAfterDisconnect(t *testing.T) {
 	session, transfer, local, remote, peerAddr := newUDPReaskLoopback(t)
 	defer local.Close()
