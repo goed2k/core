@@ -1,298 +1,106 @@
-# goed2k 与 eMule / aMule 兼容性说明
-
-本文档描述 **goed2k**（`github.com/goed2k/core`）相对官方 **eMule** 与 **aMule** 客户端的能力对照：已实现项、部分实现项、以及主要差距与后续方向。
-
-**适用范围**：当前 `main` 分支及 P0/P1 兼容分支（`cursor/p0-emule-compat-6407`、`cursor/p1-emule-compat-6407`，PR #11 / #12）。
-
-**图例**：
-
-| 标记 | 含义 |
-|------|------|
-| ✅ | 已实现，可与主流 eMule/aMule 互操作 |
-| 🟡 | 部分实现（协议或 API 已有，业务流程/ UI / 自动化不完整） |
-| ❌ | 未实现或刻意不做 |
-| ⚙️ | 默认关闭，需配置启用 |
-
----
-
-## 1. 总览
-
-goed2k 定位为 **ED2K/eMule 协议库 + 终端下载管理器**，核心下载、找源、KAD、服务器、混淆、AICH 等主路径已可用。与完整 eMule/aMule 相比，差距主要集中在：
-
-- 图形界面与插件生态（goed2k 仅有 TUI）
-- 部分 eMule 扩展协议（Captcha、出站 MultiPacket、完整 Preview UI）
-- 与 eMule 完全一致的目录/临时文件生命周期（`NNN.part` 重命名、下载中自动写 `.part.met`）
-- Kad2、KAD↔KADV6 互通、IRC、Web 服务等周边功能
-
----
-
-## 2. 客户端标识与握手
-
-| 能力 | eMule/aMule | goed2k | 说明 |
-|------|-------------|--------|------|
-| 客户端名称 / Mod 名 | 可配置 | ✅ `goed2k` | `Settings.ClientName` / `ModName` |
-| User Hash（16 字节） | 随机/固定 | ✅ | `Settings.UserAgent` |
-| Hello / HelloAnswer | 标准 | ✅ | `peer_connection.go` |
-| ExtHello / ExtHelloAnswer | eMule 扩展 | ✅ | 含版本、SecIdent 等标签 |
-| Misc 选项（AICH、Unicode、SX、压缩等） | 位域标签 `0xFA` | ✅ | `MiscOptions` |
-| Misc2（大文件、SX2、Captcha 声明等） | 位域 `0xFE` | 🟡 | Captcha 仅声明位，无实际处理 |
-| Source Exchange 能力协商（tag `0x3B`） | v2–v5 | ✅ | 含 goed2k 扩展 **v5 IPv6** |
-| Preview 能力宣告 | 可选 | 🟡 | 协议支持；Hello **暂不宣告**（CryptLayer CI 互操作） |
-| MultiPacket 能力宣告 | 可选 | 🟡 | 入站展开已实现；出站合并 **已禁用** |
-
----
-
-## 3. 客户端 ↔ 客户端（TCP）
-
-### 3.1 下载 / 上传主流程
-
-| 能力 | 状态 | 关键实现 |
-|------|------|----------|
-| FileRequest / FileAnswer | ✅ | `peer_connection.go` |
-| FileStatusRequest / Answer（BitField） | ✅ | |
-| HashSetRequest / Answer | ✅ | 大文件分片哈希集 |
-| StartUpload / AcceptUpload / QueueRanking | ✅ | `upload_queue.go` |
-| RequestParts32 / RequestParts64 | ✅ | 按文件大小自动选择 |
-| SendingPart32/64、CompressedPart32/64 | ✅ | 上传 zlib 压缩（可配置） |
-| CancelTransfer / OutOfParts | ✅ | |
-| 上传队列与积分（Credits） | ✅ | `client_credits.go`；可仅统计已验证 peer |
-| 好友槽（Friend Slot） | ✅ | `session.go` / `peer_connection.go` |
-
-### 3.2 来源交换（Source Exchange）
-
-| 版本 | 操作码 | 状态 | 说明 |
-|------|--------|------|------|
-| **SX1** | `0x81` / `0x82` | ✅ | 旧客户端回退；`source_exchange_sx1.go`、`peer_connection_p1.go` |
-| **SX2 v4** | `0x83` / `0x84` | ✅ | UserHash + CryptOptions；`source_exchange.go` |
-| **SX2 v5（IPv6）** | 同上 + 16B IPv6 | ✅ | Hello `0x3B` 协商；`DialAddr` 双栈拨号 |
-| 应答时填充 ServerIP/ServerPort（SX1） | ✅ | `session_server_exchange.go` |
-| 合并来源进 Policy | ✅ | `policy.go`；过滤局域网/自身/低质量地址 |
-| 纯 SharedFile 上传时 SX 应答 | 🟡 | 仅应答本机单源，不广播其他 peer |
-
-详见 [source-exchange-CN.md](source-exchange-CN.md)。
-
-### 3.3 预览（Preview）
-
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| RequestPreview / PreviewAnswer（`0x90`/`0x91`） | 🟡 | 编解码与 handler 完整：`preview.go`、`peer_connection_p1.go` |
-| 上传侧应答（按分片读盘） | ✅ | `CanUploadRange` + `ReadRange` |
-| 下载侧请求 | 🟡 | 目前仅在 `AcceptUpload` 后请求 **piece 0** |
-| 缓存预览数据 | ✅ | `Transfer.StorePreviewPiece` / `PreviewPiece` |
-| TUI / API 展示预览 | ❌ | 无 UI |
-
-### 3.4 MultiPacket（合并发送）
-
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| OP_MULTIPACKET_EXT2（`0xA9`）解压入站 | ✅ | `expandIncomingMultiPackets`、`multipacket.go` |
-| 出站 zlib 合并多帧 | ❌ | **刻意禁用**（与 CryptLayer 握手在 CI/部分环境冲突） |
-| PackMultiPacketExt2 API | ✅ | 可供外部或后续启用 |
-
-### 3.5 安全与完整性
-
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| **CryptLayer** 协议混淆 | ✅ ⚙️ | RC4、端口+3、独立混淆监听；`protocol_obfuscation.go` |
-| CryptLayer 强制模式 | ✅ ⚙️ | `CryptLayerRequired` |
-| **SecIdent** 安全身份 | ✅ ⚙️ | RSA 2048、挑战应答；`secure_ident.go` |
-| **AICH** 损坏检测与恢复 | ✅ | 根哈希、分块哈希、自动恢复；`aich.go` |
-| FileComment / Rating | 🟡 | 出站评论、入站解析；rating 无业务/UI |
-| Captcha | ❌ | Hello 可声明，无处理器 |
-
-### 3.6 其他客户端 TCP
-
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| 聊天（Chat） | ❌ | eMule 已废弃的服务器聊天相关 opcode 未实现 |
-| 浏览共享文件（View Shared Files） | ❌ | Hello 声明 `NoViewSharedFiles` |
-
----
-
-## 4. 客户端 ↔ 服务器（TCP）
-
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| LoginRequest / IdChange | ✅ | 含 `ObfuscationTCPPort`、`ReportedIP` |
-| GetServerList（`0x14`） | ✅ | |
-| **GetSources**（`0x19`） | ✅ | 低 ID / 高 ID 分别入 Policy |
-| **GetSourcesObfu**（`0x23`） | ✅ | `EnableCryptLayer` 时并行请求；`found_file_sources_obfu.go` |
-| **FoundSourcesObfu**（`0x44`） | ✅ | 解析 CryptOptions + UserHash |
-| OfferFiles（`0x15`） | ✅ | 完成传输 + 共享库 |
-| SearchRequest / SearchMore / SearchResult | ✅ | `search.go` |
-| CallbackRequest / CallbackRequestIncoming | ✅ | 低 ID 穿透；`session_callback.go` |
-| Server Status / Message | ✅ | |
-| 服务器 TCP CryptLayer | ✅ ⚙️ | 优先连混淆端口 |
-| 多服务器并发与 Ping 排序 | ✅ | `server_connection_policy.go` |
-| `server.met` 加载（本地/URL/ed2k） | ✅ | |
-| 服务器搜索高级选项（布尔树全功能） | 🟡 | 基础搜索可用，复杂查询树覆盖有限 |
-
----
-
-## 5. UDP
-
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| KAD UDP（与客户端共用端口） | ✅ | `dht_tracker.go` |
-| GlobServStat（服务器 UDP 统计） | ✅ | `server_glob_udp.go` |
-| 客户端 UDP ReAsk（`0x90`/`0x91`） | 🟡 | 收发与 `SendUDPReaskPing` API：`client_udp.go` |
-| ReAsk 结果驱动防火墙/低 ID 策略 | ❌ | `IsUDPReachable()` 存在，下载管线未使用 |
-| Kad UDP 混淆 | ❌ | eMule 规范中 Kad UDP 尚不可混淆 |
-| 全局搜索 UDP（GlobSearch 等） | ❌ | 仅 TCP 搜索 + KAD |
-
----
-
-## 6. Kademlia（KAD / KADV6）
-
-| 能力 | eMule/aMule | goed2k | 说明 |
-|------|-------------|--------|------|
-| Kad4（IPv4）路由与 RPC | ✅ | ✅ | `dht_tracker.go`、`protocol/kad` |
-| Bootstrap、`nodes.dat` | ✅ | ✅ | 本地/URL/多源 |
-| 搜源（Publish / Search Sources） | ✅ | ✅ | 并入 Transfer Policy |
-| 关键字搜索 | ✅ | ✅ | |
-| Notes 搜索与发布 | ✅ | ✅ | 完成时发布 `FileComment` |
-| 完成文件周期发布（~30min） | ✅ | ✅ | `session_kad_publish.go` |
-| **部分完成文件发布源** | 可配置 | ✅ | `PartialKadPublish` + `isKadPublishable()` |
-| Callback / FindBuddy | 部分 | 🟡 | RPC 存在，非完整 buddy 体验 |
-| **KADV6**（IPv6 DHT） | aMule 等有扩展 | ✅ | 独立叠加层；`kadv6_tracker.go` |
-| KAD ↔ KADV6 互通 | — | ❌ | 两套网络需分别启用 |
-| Kad2 协议 | 新版本 | ❌ | 仅 Kad4 + KADV6 |
-
-详见 [kadv6-protocol-CN.md](kadv6-protocol-CN.md)。
-
----
-
-## 7. 文件、目录与配置格式
-
-| 格式 / 行为 | eMule/aMule | goed2k | 状态 |
-|-------------|-------------|--------|------|
-| ED2K 文件链接（含 AICH、分片 hash） | ✅ | ✅ | `emule_link.go` |
-| Collection 链接 / 文件 | ✅ | ✅ | `client.go` |
-| **二进制 `.part.met`** | ✅ | ✅ | P0：`protocol/emule_partmet.go`、`part_met.go` |
-| goed2k JSON `.part.met.json` 旁注 | — | ✅ | 导出时可选写出；导入自动识别 |
-| 下载中自动维护 `.part.met` | ✅ | ❌ | 续传走 `state.json`；需手动 `ExportPartMet` |
-| **`NNN.part` 临时布局** | Temp 目录 | 🟡 | P1：`transfer_path.go`；`UseEmuleTempLayout` + `AddLink` |
-| 完成后 `NNN.part` → 最终文件名 | ✅ | ❌ | 无 Incoming 目录搬运 |
-| **`preferences.ini` / `amule.conf`** | ✅ | 🟡 | P1：`emule_import.go`；无 CLI/TUI 入口 |
-| **`ipfilter.dat`**（PeerGuardian / AntiP2P） | ✅ | ✅ | P0：`ipfilter.go`；AccessLevel + FilterLevel |
-| `state.json`（任务/积分/DHT/共享） | — | ✅ | goed2k 自有格式 |
-| `server.met` / `nodes.dat` | ✅ | ✅ | |
-| IP 过滤接入连接策略 | ✅ | ✅ | `policy.go` |
-
-`.part.met` 格式说明见 [part-met-format-CN.md](part-met-format-CN.md)。
-
----
-
-## 8. 网络、共享与其它客户端能力
-
-| 能力 | eMule/aMule | goed2k |
-|------|-------------|--------|
-| UPnP 端口映射 | 可选 | ✅ TCP + 混淆 TCP + KADV6 UDP |
-| 显式 IPv6 入站（tcp6） | 部分 | ✅ |
-| 下载/上传限速 | ✅ | ✅ |
-| 分类（按扩展名路由目录） | ✅ | ✅ |
-| 任务上传/下载优先级 | ✅ | ✅ |
-| 本地共享库 + 扫描目录 | ✅ | ✅ |
-| Server/KAD 发布共享文件 | ✅ | ✅ |
-| Web 界面 | 官方无 / 插件 | ❌（独立 `goed2k/daemon` + `goed2k/webui`） |
-| IRC / 消息 | 有 | ❌ |
-| 内置浏览器 / 媒体播放器 | 有 | ❌ |
-
----
-
-## 9. P0 / P1 已完成兼容项（分支对照）
-
-### P0（PR #11）
-
-| # | 项 | 状态 |
-|---|-----|------|
-| 1 | eMule 二进制 `.part.met` 读写 | ✅ |
-| 2 | Source Exchange v5（IPv6 扩展） | ✅ |
-| 3 | `ipfilter.dat`（PeerGuardian + AccessLevel） | ✅ |
-| 4 | SecIdent / CryptLayer 互操作回归测试 | ✅ |
-
-### P1（PR #12）
-
-| # | 项 | 状态 | 备注 |
-|---|-----|------|------|
-| 6 | SX1（`0x81`/`0x82`） | ✅ | 与 SX2 自动选择 |
-| 7 | 客户端 UDP ReAsk | 🟡 | 协议有，业务未集成 |
-| 8 | 下载预览 Preview | 🟡 | 无 UI；仅 piece 0 |
-| 9 | MultiPacket 合并 | 🟡 | 仅入站 |
-| 10 | eMule 配置导入 | 🟡 | API 有，无 CLI |
-| 11 | `.ed2kpart` / `NNN.part` 路径 | 🟡 | 分配槽位，不自动重命名 |
-| 12 | GetSourcesObfu | ✅ | |
-| 13 | 客户端标识 `goed2k` | ✅ | |
-| 14 | 部分完成文件 KAD 发布 | ✅ | `PartialKadPublish` |
-
----
-
-## 10. 与 eMule / aMule 的主要差距（待办方向）
-
-以下按优先级归纳，便于后续迭代（P2 及以后）。
-
-### 10.1 协议与互操作
-
-| 差距 | 影响 | 建议方向 |
-|------|------|----------|
-| MultiPacket **出站**合并 | 与部分客户端带宽效率 | 修复 CryptLayer 握手期合并问题后重新启用 |
-| Preview 多分片 + UI | 预览体验 | TUI/API 展示 `PreviewPiece` |
-| Hello 宣告 Preview/MultiPacket | 与 eMule 能力对齐 | 握手稳定后恢复宣告 |
-| Captcha 协议 | 少数 mod 要求 | 低优先级 |
-| UDP ReAsk 驱动连接策略 | 防火墙/NAT 判断 | 在 Policy 中参考 `IsUDPReachable()` |
-| Kad2 / KAD↔KADV6 桥接 | 网络融合 | 架构级，见 KADV6 文档 |
-| 与全版本 eMule 大规模联调 | 回归信心 | 扩展 `protocol_e2e_test.go`、live 测试 |
-
-### 10.2 文件与迁移
-
-| 差距 | 影响 | 建议方向 |
-|------|------|----------|
-| 下载中自动写 `.part.met` | 与 aMule 交叉续传 | 在 `SecondTick` 或分片完成时增量导出 |
-| `NNN.part` 完成后重命名 | 目录布局与 eMule 一致 | `Finished` 时移到 Incoming + 最终名 |
-| `ImportEmulePreferences` CLI | 从 eMule 迁移 | `goed2k --import-prefs` |
-| NickName 等未映射字段 | 配置完整性 | 扩展 `ApplyEmulePreferences` |
-
-### 10.3 产品与生态
-
-| 差距 | 说明 |
-|------|------|
-| 图形界面 | eMule/aMule 为 GUI；goed2k 为 TUI + 外部 Web |
-| 插件、Mod 脚本 | 无 |
-| 自动更新服务器列表 / 智能 Kad 引导 | 部分有（`server.met`、`nodes.dat`），无 eMule 全套智能服务器 |
-| 媒体预览、评论社区 | 无 |
-
----
-
-## 11. 代码与测试索引
-
-| 主题 | 路径 |
-|------|------|
-| Peer 协议状态机 | `peer_connection.go`、`peer_connection_p1.go` |
-| 来源交换协议 | `protocol/client/source_exchange.go`、`source_exchange_sx1.go` |
-| 服务器协议 | `server_connection.go`、`protocol/server/` |
-| KAD 发布 | `session_kad_publish.go`、`session_kadv6_publish.go` |
-| `.part.met` | `protocol/emule_partmet.go`、`part_met.go` |
-| IP 过滤 | `ipfilter.go` |
-| eMule 配置 / 路径 | `emule_import.go`、`transfer_path.go` |
-| 混淆 | `protocol_obfuscation.go` |
-| 互操作测试 | `protocol_e2e_test.go`、`phase_h_test.go` |
-
-**建议测试命令**：
-
-```bash
-go test -race -count=1 ./...
-go test -run 'EMuleInterop|SourceExchange|PartMet|IPFilter|Preview|MultiPacket|Obfu' ./...
-```
-
----
-
-## 12. 参考
-
-- [eMule 官方](https://www.emule-project.net/)
-- [aMule 文档](https://amule-org.github.io/docs/)
-- 仓库内：[CHANGELOG.md](../CHANGELOG.md)、[source-exchange-CN.md](source-exchange-CN.md)、[part-met-format-CN.md](part-met-format-CN.md)
-- aMule 源码参考：`DownloadClient.cpp`、`PartFile.cpp`、`ClientTCPSocket.cpp`（SX2）、`opcodes.h`
-
----
-
-*文档随 P0/P1 合并进度更新；若代码与本文冲突，以仓库 `main` 及 `CHANGELOG.md` [Unreleased] 为准。*
+# goed2k 与 eMule / aMule 兼容性基线及实施路线
+
+本文档是 `github.com/goed2k/core` 后续兼容性工作的执行基线。它记录当前源码能证明的范围、尚未闭环的风险、优先级、验证方式和逐 PR 门禁；不把“存在编解码器或本地单测”等同于“已与真实 eMule/aMule 互操作”。
+
+## 1. 基线、范围与判定原则
+
+- **基线**：`main` 分支提交 `6ac1c09`（2026-08-20 审查）。
+- **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
+- **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
+- **证据等级**：
+  - **已覆盖**：源码中有完整入口、状态流转和自动化测试，但在真实客户端矩阵完成前仍不宣称“完全兼容”。
+  - **部分覆盖**：已有结构、编解码或局部处理，业务闭环、线格式或跨平台验证仍缺失。
+  - **缺失/待核对**：没有实现，或现有实现不能由真实线协议证据支持。
+- **优先级**：P0 会破坏主要互操作闭环或产生错误能力声明；P1 影响迁移、可靠性或平台一致性；P2 是高级协议、产品完整性与长期回归体系。
+
+## 2. 当前兼容范围
+
+以下能力已有可追踪实现，可以作为后续修复的回归基线，但仍需第 5 节的真实互操作矩阵给出最终兼容结论。
+
+| 范围 | 当前结论 | 主要证据 |
+|---|---|---|
+| ED2K 服务器 TCP | Login、IdChange、GetSources、Search、Callback、OfferFiles 等基础路径已存在 | `server_connection.go`、`protocol/server/`、`session_callback.go` |
+| 客户端 TCP 基础传输 | Hello、文件状态、HashSet、32/64 位请求及普通/压缩数据帧已有处理 | `peer_connection.go`、`protocol/client/packet_combiner.go` |
+| 来源交换 | SX1、SX2 及仓库自有 IPv6 扩展已有编解码和策略合并 | `peer_connection_p1.go`、`protocol/client/source_exchange*.go`、`policy.go` |
+| Kad4 | 路由、节点加载、来源/关键字/Notes 搜索与发布路径已存在 | `dht_tracker.go`、`kad_*`、`protocol/kad/`、`session_kad_publish.go` |
+| KADV6 | 独立 IPv6 叠加层已有路由、来源发布/搜索及下载策略接入 | `kadv6_tracker.go`、`kadv6_*`、`protocol/kadv6/`、`session_kadv6.go` |
+| 文件完整性与续传 | ED2K 分片哈希、AICH 局部恢复、goed2k state、二进制及 JSON `.part.met` 读写已存在 | `transfer.go`、`aich.go`、`client_state.go`、`part_met.go`、`protocol/emule_partmet.go` |
+| 安全与连接 | CryptLayer、SecIdent、IP 过滤及封禁已有实现和本地测试 | `protocol_obfuscation.go`、`secure_ident.go`、`ipfilter.go`、`ban_peer.go` |
+
+上述“已存在”只说明代码路径可用。尤其是队列、UDP ReAsk、MultiPacket、LowID Kad 来源和跨平台文件行为，不能从本地回环测试推导为真实客户端兼容。
+
+## 3. P0：主要互操作闭环
+
+| 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
+|---|---|---|---|---|
+| **上传排队身份和 ReAsk 生命周期不闭环** | 下载侧收到 `QueueRanking` 后在 `peer_connection.go:ProcessIncoming` 调用 `Close(QueueRanking)`；`QueueRanking` 是非零错误码，`OnDisconnect` 会标记失败并移除连接。上传侧 `upload_queue.go` 的等待项是 `[]*PeerConnection`，`OnDisconnect` 会删除它；`lastUploadRequest`、rank、等待起点也都绑定连接。未见跨连接队列身份或标准周期 ReAsk 调度。 | 客户端可能收到排队名次后丢失来源/等待资格，重连后无法连续累计队列时间，长队列下载难以开始。**断开 TCP 本身并不必然不兼容**；问题是缺少稳定身份、重询和重新关联闭环。 | 高 | 先做纯状态机测试：QueueRanking 不计为来源失败；断线后以 UserHash/文件 hash 等稳定键保留等待身份；周期 ReAsk 后恢复 rank；HighID/LowID、超时、取消和重复连接均覆盖。再与 eMule/aMule 长队列抓包联调。 |
+| **客户端 UDP ReAsk 不是标准 OP_REASKFILEPING** | `client_udp.go` 只发送 6 字节：协议头、`0x90` 和两个端口；未携带标准请求所需的至少 16 字节文件 hash。ACK 仅 2 字节，未带 queue rank，也没有 FileNotFound/QueueFull 分支。 | 对端无法识别具体文件和真实排队状态；当前实现不能表述为“协议完成、只差业务接入”。 | 高 | 为 Ping、ACK、FileNotFound、QueueFull 建立 golden bytes；用真实抓包校对操作码、字段顺序、长度和版本条件；验证收到 rank 后更新同一跨连接队列身份，并覆盖畸形包和未知文件。 |
+| **普通块边界为 190 KiB，与主流 180 KiB 不一致** | `constants.go` 的 `BlockSize=190*1024`，`data/peer_request.go` 的 `prBlockSize` 同为 190 KiB；该值进入 picker、磁盘偏移、请求、接收、HTTP Range、`.part.met` gap 和 AICH 重置映射。`aich.go` 的 `AICHBlockSize=180*1024`。 | 边界差异可能影响与标准 BLOCKSIZE/EMBLOCKSIZE=180 KiB 的请求切分、断点区间和 AICH 坏块映射。现阶段证据不足，**不得直接断言一定导致数据损坏**。 | 高 | 先列出全链路边界清单，再用非整块尾部、跨块压缩包、64 位偏移、断点导入和 AICH 恢复做表驱动测试；加入 eMule/aMule 请求区间抓包对照后再改常量。 |
+| **Kad LowID 来源消费丢失语义，发布固定 HighID 类型** | `protocol/kad/types.go:SourceEndpoint` 接受多种 `SourceType`，但只返回 IP/端口；`session.go:SendDHTSourcesRequest` 随后直接 `AddPeer(endpoint, PeerDHT)`，没有保留 LowID、服务器、Buddy/回调标签。`dht_tracker.go:PublishSource` 将 `TagSourceType` 固定为 `1`。 | LowID 搜源结果可能被当作可直连 HighID，导致无效拨号；本机为 LowID 时仍发布 HighID 语义，其他客户端难以回调。 | 中高 | 为各 SourceType 建立结构化解析测试；HighID 走直连，LowID 保留 server/buddy/callback 元数据并进入对应策略；发布端按实际可达性输出标签。使用真实 LowID 节点联调。 |
+| **Hello/MiscOptions 能力声明与处理能力不一致** | `peer_connection.go:PrepareHelloAnswer` 设置 Captcha、大文件和 SX2；仓库只有 Captcha 位操作，无 Captcha 包处理器。`UDPVer`、`SupportsPreview`、`MultiPacket` 未声明。`SupportLargeFiles()` 对已设置位返回 `false`，条件疑似写反，且读取结果基本未进入决策。 | 对端可能发送本客户端无法处理的能力流量，或因未声明已有能力而禁用功能；大文件能力判断可能反向。 | 中 | 逐位 golden test 对照 eMule/aMule 定义；只声明端到端已实现并互操作验证的能力；修正 getter 后验证大文件 32/64 位路径。Captcha 在处理器完成前不声明，Preview/MultiPacket/UDP 仅在各自闭环后声明。 |
+
+## 4. P1：可靠性、迁移与平台一致性
+
+| 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
+|---|---|---|---|---|
+| **Server Login 标签不完整** | `protocol/server/login_request.go:NewLoginRequest` 只写版本、能力、名称和 eMule 版本；`Settings` 已有 `UDPPort`、`ObfuscationTCPPort`，但 LoginRequest 未传入或编码对应标签。 | 服务器无法获得完整 UDP/混淆端口能力，可能降低 UDP 服务发现和混淆回连成功率。 | 中 | 对照 eMule/aMule 登录 golden bytes；按能力开关验证标签出现条件，并在支持扩展标签的真实服务器检查 IdChange/回连行为。 |
+| **`.part.met` 不是下载中的自动兼容状态源** | `part_met.go:ExportPartMet` 仅由显式 API 调用；日常续传主要走 `client_state.go`。`resumeFromGaps` 对二进制导入只标记完全没有 gap 的 piece，不构造 `DownloadedBlocks`，因此部分 piece 的已下载区间会丢失。 | 与 eMule/aMule 交叉接管任务时会丢部分进度；异常退出前未手动导出时二进制 `.part.met` 可能过期。 | 中高 | 从带多段 gap 的真实 `.part.met` 导入并逐字节核对保留区间；在分片/块完成和节流周期原子更新；模拟崩溃恢复及双客户端交叉续传。 |
+| **AICH 根哈希只应答，不主动获取** | `peer_connection.go` 注册并处理 `AICHFileHashRequest/Answer`，可发送根哈希 Answer；未见发送 `AICHFileHashRequest` 的调用。已有根哈希后，`transfer.go:requestAICHRecovery` 才会主动请求 piece 块哈希。 | 链接或状态未携带 AICH 根时，客户端无法自行补齐根哈希，AICH 恢复链路无法启动。 | 中 | 增加“缺根→向支持 AICH 的 peer 请求→校验并保存→坏片时请求块哈希”的状态机测试；拒绝 hash/file 不匹配及冲突根；与真实客户端联调。 |
+| **MultiPacket EXT2 线格式未经真实协议证明** | `protocol/client/multipacket.go` 将完整已编码帧整体 zlib 压缩；测试只做本实现 Pack/Unpack 自洽。`peer_connection_p1.go:tryCoalesceOutgoingMultiPacket` 为空，出站禁用。 | 本地往返通过不能证明符合 eMule 线格式；贸然开启可能导致解包失败、连接中断或与 CryptLayer 时序冲突。 | 高 | 先收集 eMule/aMule golden 抓包和源码定义，建立单向 fixture 测试，不能只做自身 round-trip；分别覆盖明文、CryptLayer、半包、尾随帧和未知子包，再决定是否启用出站。 |
+| **Windows/macOS 稀疏、预分配和 Windows 文件名规则缺口** | `disk/preallocate_linux.go` 仅 Linux 使用 `fallocate`；`disk/preallocate_stub.go` 在所有非 Linux 平台静默成功但不执行真实预分配/稀疏标记。`transfer_path.go` 和 `client.go:AddLink` 直接以远端文件名 `filepath.Join`，未见 Windows 保留名、非法字符和尾随点空格清洗。 | 配置显示成功但磁盘策略未生效；恶意或不合法 ED2K 文件名可能创建失败、路径行为不一致或任务无法恢复。 | 中高 | Windows 使用系统稀疏/分配 API、macOS 使用可证明的预分配路径；分别检查实际分配块数。为 `CON`、`NUL`、冒号、反斜杠、尾随点空格、重复名和超长名建立跨平台测试。 |
+| **KADV6 关键路径依赖真实 IPv6 环境验证** | `session_kadv6_integration_test.go` 的常规测试使用文档地址和内存合并；由 `GOED2K_RUN_KADV6_INTEGRATION=1` 启用的 live 测试虽检查本机 IPv6 出站地址，但仍只验证本地发布索引，没有公网 bootstrap、远端搜索或拨号。 | 常规 CI 通过不能证明公网 IPv6 bootstrap、发布、搜索和拨号可用。 | 中 | 在具备原生 IPv6 的独立 CI job 运行双节点和公开节点测试，记录路由收敛、发布可见性、来源拨号及无 IPv6 时的明确降级。 |
+| **Settings、bootstrap Config 与 ClientState 存在漂移** | `settings.go` 包含临时布局、Kad 发布、磁盘、Web 下载等字段；`bootstrap/config.go` 只映射其中一部分；`client_state.go` 只持久化部分运行配置，版本接受列表还跳过了版本 5/6。 | CLI、库、daemon 或重启后的行为可能不一致，新字段容易静默采用默认值。 | 中 | 建立字段清单和映射测试：默认值、CLI/env→Settings、Settings→状态快照→恢复逐项核对；明确哪些字段刻意不持久化并写入迁移测试。 |
+
+## 5. P2：高级能力与长期质量
+
+| 缺口 | 代码证据 | 用户影响 | 复杂度 | 验证方式 |
+|---|---|---|---|---|
+| **高级搜索与 KADV6 集成搜索不完整** | `session.go:startDHTSearch` 只启动 Kad4 关键字搜索；服务器查询使用固定字段，未覆盖完整布尔树。虽然 `Client.SearchDHTv6Keywords` API 存在，统一搜索任务没有接入。 | IPv6-only 结果不出现在常规搜索中，复杂筛选与 eMule/aMule 结果不一致。 | 中高 | 以相同查询对比 Server、Kad4、KADV6 的合并/去重；为布尔树、类型、扩展名、大小和来源数建立 golden query。 |
+| **Buddy/PeerCache 生命周期缺失** | `protocol/kad/` 有 Buddy 相关标签/报文，`session_callback.go` 有部分 callback/find buddy 路径；未见完整 Buddy 选举、保活、重连状态机，也未见 PeerCache 实现。 | LowID/NAT 场景回调可靠性和缓存加速能力低于完整客户端。 | 高 | 双 NAT/LowID 环境做 Buddy 建立、失效、替换和回调测试；PeerCache 需先按独立威胁模型与真实协议 fixture 验证。 |
+| **Kad2 与 Kad4↔KADV6 桥接缺失** | `protocol/kad/` 与 `protocol/kadv6/` 是独立实现；`docs/kadv6-protocol*.md` 明确当前无桥接，仓库未见 Kad2 状态机。 | 无法参与对应网络或跨叠加层共享来源。 | 很高 | 先形成协议设计和安全边界 RFC；使用独立互操作节点验证路由、发布、搜索、去环和隐私，不与其他 P0/P1 改动同 PR。 |
+| **`NNN.part` 完成搬运缺失** | `transfer_path.go` 能分配 `NNN.part`，但未见完成后原子搬运到 Incoming/最终文件名的路径。 | eMule 临时目录模式下，完成文件仍保留临时名，迁移体验不完整。 | 中 | 跨卷、目标已存在、非法文件名、崩溃重试和 Windows 文件占用测试；数据与 `.met` 清理必须保持可恢复。 |
+| **真实互操作与 fuzz 矩阵不足** | `protocol_e2e_test.go`、`phase_h_test.go` 以本实现双端/本地 fixture 为主；仓库未建立覆盖关键解析器的持续 fuzz corpus，也没有多版本 eMule/aMule 矩阵。 | 自洽实现可能双方共同犯错，边界包、畸形包和版本差异难以及时发现。 | 高（持续） | 建立 Windows eMule、Linux/macOS aMule、多版本、HighID/LowID、明文/混淆、大文件矩阵；对 Hello、标签、Queue/ReAsk、MultiPacket、Kad、`.part.met` 等解析器运行持续 fuzz，并归档抓包 fixture。 |
+
+## 6. 分步 PR 顺序
+
+每个编号都是独立分支和独立 PR；前一项合并后才从最新 `main` 创建下一分支。不得把多个高风险协议改动塞进同一 PR。
+
+1. **能力位诚实性**：移除未实现 Captcha 声明，修正并测试大文件能力 getter；仅在有真实证据时调整其他位。这是低风险首个实现 PR。
+2. **跨连接上传队列身份**：引入稳定队列键和等待记录，使 TCP 断开不等于删除排队身份；只改队列模型与测试。
+3. **TCP QueueRanking/ReAsk 闭环**：QueueRanking 不再作为普通失败，按标准周期重询并重新关联第 2 步身份；完成 HighID/LowID、取消、超时闭环。完成此项前不转向其他功能项。
+4. **UDP ReAsk 线协议**：独立实现 Ping、ACK rank、FileNotFound、QueueFull 编解码和状态接入；必须先有真实 fixture。
+5. **180 KiB 边界审计与迁移**：先提交边界清单/测试，再在单独 PR 改全链路常量；如证据否定变更则关闭实现 PR 并更新本文。
+6. **Kad LowID 消费链路**：保留 SourceType、服务器/Buddy/回调语义并更新策略。
+7. **Kad 发布类型**：根据实际 HighID/LowID 和可达性生成来源标签，与第 6 步分开验证。
+8. **Server Login 扩展标签**：补齐 UDP/混淆端口及条件能力标签。
+9. **`.part.met` 精确导入**：先保留部分 piece 区间；不同时引入自动写入。
+10. **`.part.met` 自动维护**：在已验证精确模型上增加节流、原子写和崩溃恢复。
+11. **AICH 根请求闭环**：只处理主动获取、校验和状态保存。
+12. **MultiPacket 真实线协议核对**：先 fixture/抓包；出站启用必须是后续单独 PR。
+13. **跨平台文件 PR 组**：Windows 稀疏/预分配、macOS 预分配、文件名清洗分别提交。
+14. **KADV6 真实 IPv6 CI**：先增加可选、可诊断的专用 job，再讨论功能扩展。
+15. **Settings/state 一致性**：增加映射清单、迁移和 round-trip 测试。
+16. **P2 项目**：高级搜索、Buddy/PeerCache、Kad2/桥接、完成搬运、互操作/fuzz 各自立项，不共享实现 PR。
+
+## 7. 多轮审计门禁
+
+所有实现 PR 必须严格依次通过：
+
+1. **实现与测试**：先写可失败的状态机、golden bytes 或跨平台测试，再完成最小实现。
+2. **第一次自审**：检查完整 diff、状态机转移、资源生命周期、整数/长度/尾块边界、并发与失败回滚；确认没有顺手改动。
+3. **自动验证**：按范围运行 `go test`；涉及并发/网络状态运行 `go test -race -count=1 ./...`；运行 `go vet ./...`、`staticcheck ./...` 和格式检查。真实网络测试必须记录环境和跳过条件。
+4. **第二次独立代码审计**：使用独立审计者或 Bugbot，重点检查协议证据、对端不可信输入、状态重入及向后兼容。
+5. **修复后复审**：所有审计意见逐条关闭；修复产生的新 diff 必须重新跑相关测试并复审。
+6. **CI 全绿**：必需检查全部成功，不能以重跑掩盖稳定复现的失败。
+7. **等待 PR 审计无问题**：确认没有未解决 review conversation、待处理 Bugbot 发现或新的阻塞意见。
+8. **才允许合并**：合并后更新基线，再从最新 `main` 创建下一分支；禁止预先堆叠下一实现分支。
+
+本文档 PR 自身也执行两轮内容自审：第一轮逐条回到源码核对证据和措辞，第二轮核对优先级、重复项、实施顺序及 Markdown 结构。文档 PR 不运行与内容无关的 Go 代码变更。
+
+## 8. 合并与维护规则
+
+- 本文是路线基线，不是完成度宣传页；“编解码存在”“本地双端通过”“默认关闭”都不能单独证明真实互操作。
+- 每个实现 PR 合并时同步更新对应条目的证据、状态和验证结果；不删除历史风险，应记录关闭依据。
+- 任何线协议结论至少需要一项外部证据：eMule/aMule 源码定义、真实抓包或跨实现 golden fixture。
+- 发现现有前提错误时，先用文档 PR 修正基线，不为追求路线一致性强行修改代码。
+- 未满足第 7 节全部门禁时，不合并；PR 无问题只是必要条件，不能替代真实互操作证据。
