@@ -112,7 +112,7 @@ import "github.com/goed2k/core"
 | `SetStatePath(path string)` | 使用内置 JSON 文件存储。 |
 | `SetStateStore(ClientStateStore)` | 自定义存储（需实现 `Load`/`Save`）。 |
 | `StatePath() string` | 当前文件路径（若使用文件存储）。 |
-| `LoadState(path string) error` | 从路径加载（与 `SetStatePath` 配合）。 |
+| `LoadState(path string) error` | 从路径加载（与 `SetStatePath` 配合）。接受状态版本 1–8（含曾跳过的 5/6）；v8 恢复磁盘/Web/速率等策略子集。`Logger`、端口、DHT 开关等过程字段不恢复。 |
 | `SaveState(path string) error` | 保存到路径。 |
 | `SetAutoSaveInterval(d time.Duration)` | 自动保存间隔（内部循环触发）。 |
 

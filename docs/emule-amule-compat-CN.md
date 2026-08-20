@@ -4,7 +4,7 @@
 
 ## 1. 基线、范围与判定原则
 
-- **基线**：`main` 分支提交 `51603f5`（2026-08-20 审查，含 `.part.met` 节流原子写出、精确导入与 AICH 根哈希主动请求）。
+- **基线**：`main` 分支提交 `fd3a616`（2026-08-20 审查，含 Windows 文件名清洗与跨平台预分配语义）。
 - **范围**：仅审查 `core`；`daemon`、`webui` 和独立 ED2K 服务端不在本文兼容结论内。
 - **参照对象**：官方 eMule、aMule 的经典 ED2K/eMule 线协议与常见文件生命周期。
 - **证据等级**：
@@ -49,7 +49,7 @@
 | **MultiPacket EXT2 线格式未经真实协议证明** | `protocol/client/multipacket.go` 将完整已编码帧整体 zlib 压缩；测试只做本实现 Pack/Unpack 自洽。`peer_connection_p1.go:tryCoalesceOutgoingMultiPacket` 为空，出站禁用。 | 本地往返通过不能证明符合 eMule 线格式；贸然开启可能导致解包失败、连接中断或与 CryptLayer 时序冲突。 | 高 | 先收集 eMule/aMule golden 抓包和源码定义，建立单向 fixture 测试，不能只做自身 round-trip；分别覆盖明文、CryptLayer、半包、尾随帧和未知子包，再决定是否启用出站。 |
 | **Windows 文件名清洗与跨平台预分配语义已覆盖；macOS 仍仅 Truncate** | `SanitizeDownloadFilename` 在 `filepath.Join` 前去掉穿越与 `..`；仅 Windows 替换 `<>:"|?*`、控制字符、保留设备名和尾随点/空格，Unix 合法名（如冒号）不改。`disk.PreallocateSemantics` 明确三类能力：Linux `fallocate`、Windows NTFS `FSCTL_SET_SPARSE`/`FileAllocationInfo`、其余平台仅 Truncate 且不保证稀疏/占盘。`UseSparseFiles` 优先于 `PreallocateDiskSpace`。未实现 macOS `F_PREALLOCATE`。 | Windows 上非法/保留名可落盘；Settings 不再假装非 Linux 已 fallocate。macOS 仍只扩逻辑大小。清洗后不同非法名可能映射到同一文件名。 | 中 | 已有表驱动映射、保留名、穿越、超长截断、Unix 不改合法名，以及 Windows 稀疏属性/分配簇、Linux `st_blocks` 测试；均不依赖 >4GB 盘。macOS 可证明占盘为后续独立项。 |
 | **KADV6 关键路径依赖真实 IPv6 环境验证** | `session_kadv6_integration_test.go` 的常规测试使用文档地址和内存合并；由 `GOED2K_RUN_KADV6_INTEGRATION=1` 启用的 live 测试虽检查本机 IPv6 出站地址，但仍只验证本地发布索引，没有公网 bootstrap、远端搜索或拨号。 | 常规 CI 通过不能证明公网 IPv6 bootstrap、发布、搜索和拨号可用。 | 中 | 在具备原生 IPv6 的独立 CI job 运行双节点和公开节点测试，记录路由收敛、发布可见性、来源拨号及无 IPv6 时的明确降级。 |
-| **Settings、bootstrap Config 与 ClientState 存在漂移** | `settings.go` 包含临时布局、Kad 发布、磁盘、Web 下载等字段；`bootstrap/config.go` 只映射其中一部分；`client_state.go` 只持久化部分运行配置，版本接受列表还跳过了版本 5/6。 | CLI、库、daemon 或重启后的行为可能不一致，新字段容易静默采用默认值。 | 中 | 建立字段清单和映射测试：默认值、CLI/env→Settings、Settings→状态快照→恢复逐项核对；明确哪些字段刻意不持久化并写入迁移测试。 |
+| **Settings / bootstrap / state 映射已覆盖可持久化策略；过程字段仍刻意不落盘** | `BuildSettings` 映射临时布局、Kad 部分发布、磁盘预分配/稀疏、Web 下载与速率。`ClientState` 升到 v8 写入 `settings` 子集；`migrateClientState` 接受 1–8（含曾跳过的 5/6）。`InitClient` 在 `LoadState` 后用本次 Config 覆盖恢复值。不持久化 Logger、UserAgent、端口、DHT 开关、连接池与超时。 | 重启后磁盘/Web/速率策略可恢复；CLI/env 启动参数仍优先于旧 state。端口与 DHT 仍由本次进程配置决定。 | 中 | 已有默认值对齐、env→Config、Config→Settings、Settings 往返、v5/v6 升级、未知版本拒绝、Config 覆盖旧 state、以及 ClientName/MaxPeerListSize 不恢复测试。 |
 
 ## 5. P2：高级能力与长期质量
 
@@ -79,7 +79,7 @@
 12. **MultiPacket 真实线协议核对**：先 fixture/抓包；出站启用必须是后续单独 PR。
 13. **跨平台文件（Windows 文件名与预分配语义已覆盖）**：ED2K 文件名清洗与 Windows NTFS 稀疏/占盘、非 Linux 明确 Truncate-only 语义已落地。macOS `F_PREALLOCATE` 仍为后续独立 PR，不得与 180 KiB / MultiPacket / Kad / 队列混提。
 14. **KADV6 真实 IPv6 CI**：先增加可选、可诊断的专用 job，再讨论功能扩展。
-15. **Settings/state 一致性**：增加映射清单、迁移和 round-trip 测试。
+15. **Settings/state 一致性（已覆盖可持久化策略）**：Config/env 映射与 v8 快照/恢复、5/6 版本迁移已落地。过程调优字段仍刻意不持久化。
 16. **P2 项目**：高级搜索、Buddy/PeerCache、Kad2/桥接、完成搬运、互操作/fuzz 各自立项，不共享实现 PR。
 
 ## 7. 多轮审计门禁

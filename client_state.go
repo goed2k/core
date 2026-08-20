@@ -13,7 +13,11 @@ import (
 	"github.com/goed2k/core/protocol"
 )
 
-const clientStateVersion = 7
+const clientStateVersion = 8
+
+// acceptedClientStateVersions 是可迁移的历史版本。5/6 曾被旧接受列表跳过，
+// JSON 形状与 7 兼容，现统一升到当前版本。
+var acceptedClientStateVersions = []int{1, 2, 3, 4, 5, 6, 7, 8}
 
 type ClientCategoryState struct {
 	Name          string `json:"name"`
@@ -40,6 +44,25 @@ type ClientState struct {
 	SharedFiles     []ClientSharedFileState `json:"shared_files,omitempty"`
 	BannedPeers     []protocol.Endpoint     `json:"banned_peers,omitempty"`
 	Categories      []ClientCategoryState   `json:"categories,omitempty"`
+	// Settings 是可持久化的运行策略。旧版本无此字段时保持进程内默认值。
+	Settings *ClientSettingsState `json:"settings,omitempty"`
+}
+
+// ClientSettingsState 是 Settings 中会跨重启保留的策略子集。
+// 刻意不持久化：Logger、UserAgent、Mod/协议版本、端口与 DHT 开关（由 bootstrap/CLI 或 DHT 快照拥有）、
+// 连接池/超时等过程调优字段。
+type ClientSettingsState struct {
+	UseEmuleTempLayout      bool   `json:"use_emule_temp_layout"`
+	PartialKadPublish       bool   `json:"partial_kad_publish"`
+	PreallocateDiskSpace    bool   `json:"preallocate_disk_space"`
+	UseSparseFiles          bool   `json:"use_sparse_files"`
+	EnableWebDownload       bool   `json:"enable_web_download"`
+	MaxHttpSources          int    `json:"max_http_sources"`
+	MaxConcurrentHttpBlocks int    `json:"max_concurrent_http_blocks"`
+	WebCacheDir             string `json:"web_cache_dir,omitempty"`
+	HttpRequestTimeoutSec   int    `json:"http_request_timeout_sec"`
+	MaxDownloadRateKB       int    `json:"max_download_rate_kb"`
+	MaxUploadRateKB         int    `json:"max_upload_rate_kb"`
 }
 
 // ClientSharedFileState 持久化的共享文件元数据。
@@ -117,8 +140,8 @@ func (s *FileClientStateStore) Load() (*ClientState, error) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return nil, err
 	}
-	if state.Version == 0 {
-		state.Version = clientStateVersion
+	if err := migrateClientState(&state); err != nil {
+		return nil, err
 	}
 	return &state, nil
 }
@@ -211,11 +234,13 @@ func (c *Client) snapshotState() (*ClientState, error) {
 	sort.Slice(handles, func(i, j int) bool {
 		return handles[i].GetHash().String() < handles[j].GetHash().String()
 	})
+	persistable := persistableSettingsFrom(c.session.settings)
 	state := &ClientState{
 		Version:         clientStateVersion,
 		ServerAddress:   c.serverAddr,
 		IdentityVersion: 0,
 		IdentityKeyPath: c.session.settings.IdentityKeyPath,
+		Settings:        &persistable,
 		Transfers:       make([]ClientTransferState, 0, len(handles)),
 		Credits:         c.session.Credits().Snapshot(),
 		FriendSlots:     c.session.friendSlotSnapshot(),
@@ -286,8 +311,11 @@ func (c *Client) applyState(state *ClientState) error {
 	if state == nil {
 		return nil
 	}
-	if state.Version != 0 && state.Version != 1 && state.Version != 2 && state.Version != 3 && state.Version != 4 && state.Version != clientStateVersion {
-		return errors.New("unsupported state version")
+	if err := migrateClientState(state); err != nil {
+		return err
+	}
+	if state.Settings != nil {
+		applyPersistableSettings(&c.session.settings, *state.Settings)
 	}
 	c.serverAddr = state.ServerAddress
 	if state.IdentityKeyPath != "" {
@@ -378,6 +406,69 @@ func (c *Client) applyState(state *ClientState) error {
 		}
 	}
 	return nil
+}
+
+func migrateClientState(state *ClientState) error {
+	if state == nil {
+		return nil
+	}
+	if state.Version == 0 {
+		state.Version = clientStateVersion
+		return nil
+	}
+	accepted := false
+	for _, v := range acceptedClientStateVersions {
+		if state.Version == v {
+			accepted = true
+			break
+		}
+	}
+	if !accepted {
+		return fmt.Errorf("unsupported state version %d", state.Version)
+	}
+	state.Version = clientStateVersion
+	return nil
+}
+
+func persistableSettingsFrom(s Settings) ClientSettingsState {
+	return ClientSettingsState{
+		UseEmuleTempLayout:      s.UseEmuleTempLayout,
+		PartialKadPublish:       s.PartialKadPublish,
+		PreallocateDiskSpace:    s.PreallocateDiskSpace,
+		UseSparseFiles:          s.UseSparseFiles,
+		EnableWebDownload:       s.EnableWebDownload,
+		MaxHttpSources:          s.MaxHttpSources,
+		MaxConcurrentHttpBlocks: s.MaxConcurrentHttpBlocks,
+		WebCacheDir:             s.WebCacheDir,
+		HttpRequestTimeoutSec:   s.HttpRequestTimeoutSec,
+		MaxDownloadRateKB:       s.MaxDownloadRateKB,
+		MaxUploadRateKB:         s.MaxUploadRateKB,
+	}
+}
+
+func applyPersistableSettings(dst *Settings, src ClientSettingsState) {
+	if dst == nil {
+		return
+	}
+	dst.UseEmuleTempLayout = src.UseEmuleTempLayout
+	dst.PartialKadPublish = src.PartialKadPublish
+	dst.PreallocateDiskSpace = src.PreallocateDiskSpace
+	dst.UseSparseFiles = src.UseSparseFiles
+	dst.EnableWebDownload = src.EnableWebDownload
+	dst.MaxHttpSources = src.MaxHttpSources
+	dst.MaxConcurrentHttpBlocks = src.MaxConcurrentHttpBlocks
+	dst.WebCacheDir = src.WebCacheDir
+	dst.HttpRequestTimeoutSec = src.HttpRequestTimeoutSec
+	dst.MaxDownloadRateKB = src.MaxDownloadRateKB
+	dst.MaxUploadRateKB = src.MaxUploadRateKB
+}
+
+// OverlayPersistableSettings 用 src 覆盖当前可持久化策略（bootstrap/CLI 在 LoadState 之后调用，保证进程配置胜出）。
+func (c *Client) OverlayPersistableSettings(src Settings) {
+	if c == nil || c.session == nil {
+		return
+	}
+	applyPersistableSettings(&c.session.settings, persistableSettingsFrom(src))
 }
 
 func cloneResumeData(src *protocol.TransferResumeData) *protocol.TransferResumeData {
